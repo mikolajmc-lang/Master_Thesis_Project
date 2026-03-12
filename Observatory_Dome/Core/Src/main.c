@@ -57,7 +57,12 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+	if(htim->Instance == TIM1) {
+		counter = __HAL_TIM_GET_COUNTER(htim);
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -92,7 +97,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_ALL);
+  HAL_TIM_Encoder_Start_IT(&htim1, TIM_CHANNEL_ALL);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -102,9 +107,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	counter = htim1.Instance -> CNT;
-	snprintf(bufor_danych, sizeof(bufor_danych), "Impulsy: %ld \r\n", counter);
-	HAL_UART_Transmit(&huart2, (uint8_t*)bufor_danych, strlen(bufor_danych), 50);
+	//snprintf(bufor_danych, sizeof(bufor_danych), "Impulsy: %ld \r\n", counter);
+	//HAL_UART_Transmit(&huart2, (uint8_t*)bufor_danych, strlen(bufor_danych), 50);
   }
   /* USER CODE END 3 */
 }
