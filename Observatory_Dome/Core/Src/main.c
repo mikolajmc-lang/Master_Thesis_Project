@@ -45,15 +45,15 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-uint32_t counter = 0;
-float angle = 0;
-char bufor_danych[64];
+uint32_t delay_time = 0;
+uint16_t counter = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+uint16_t encoder_cnt_get();
+void encoder_display_angle(uint16_t position);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -103,10 +103,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	counter = __HAL_TIM_GET_COUNTER(&htim3);
-	angle = (float)(360.0/80.0)*counter;
-	snprintf(bufor_danych, sizeof(bufor_danych), "Angle: %.f \r\n", angle);
-	HAL_UART_Transmit(&huart2, (uint8_t*)bufor_danych, strlen(bufor_danych), 50);
+	counter = encoder_cnt_get();
+
+	if(HAL_GetTick() - delay_time > 20) {
+
+		delay_time = HAL_GetTick();
+		encoder_display_angle(counter);
+	}
   }
   /* USER CODE END 3 */
 }
