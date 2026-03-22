@@ -10,6 +10,7 @@
 #include "tim.h"
 
 #include <encoder.h>
+#include <nextion.h>
 
 
 
@@ -19,6 +20,13 @@ uint16_t encoder_cnt_get()
 	cnt = __HAL_TIM_GET_COUNTER(&htim3);
 
 	return cnt;
+}
+
+float encoder_angle_get(uint16_t positioning)
+{
+	float angle = (float) (360.0/80.0)* positioning;
+
+	return angle;
 }
 
 void encoder_display_angle(uint16_t position)

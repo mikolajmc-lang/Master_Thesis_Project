@@ -24,6 +24,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <nextion.h>
 #include <encoder.h>
 /* USER CODE END Includes */
 
@@ -46,14 +48,19 @@
 
 /* USER CODE BEGIN PV */
 uint32_t delay_time = 0;
+uint32_t nextion_delay_time = 0;
 uint16_t counter = 0;
+
+float angle_to_display = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 uint16_t encoder_cnt_get();
+float encoder_angle_get(uint16_t positioning);
 void encoder_display_angle(uint16_t position);
+void Nextion_SendString(char *ID, float info);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -92,8 +99,10 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_TIM3_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -103,13 +112,34 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
 	counter = encoder_cnt_get();
+	angle_to_display = encoder_angle_get(counter);
 
 	if(HAL_GetTick() - delay_time > 20) {
 
 		delay_time = HAL_GetTick();
-		encoder_display_angle(counter);
+
+		Nextion_SendString("t0", angle_to_display);
+		//encoder_display_angle(counter);
 	}
+
+
+
+	/*static uint8_t stan = 0;
+
+	if(HAL_GetTick() - nextion_delay_time > 1000) {
+
+		nextion_delay_time = HAL_GetTick();
+
+		if(!stan)
+			Nextion_SendString("t0","Hello");
+		else
+			Nextion_SendString("t0","World");
+
+		stan = !stan;
+	}*/
+
   }
   /* USER CODE END 3 */
 }
