@@ -47,6 +47,9 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+uint8_t Rx_Data[4];
+uint8_t page_switch = 0;
+
 uint32_t delay_time = 0;
 uint32_t nextion_delay_time = 0;
 uint16_t counter = 0;
@@ -102,7 +105,7 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
-
+  HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -116,29 +119,15 @@ int main(void)
 	counter = encoder_cnt_get();
 	angle_to_display = encoder_angle_get(counter);
 
-	if(HAL_GetTick() - delay_time > 20) {
+	if(page_switch) {
+		if(HAL_GetTick() - delay_time > 20) {
 
-		delay_time = HAL_GetTick();
+			delay_time = HAL_GetTick();
 
-		Nextion_SendString("t0", angle_to_display);
-		//encoder_display_angle(counter);
+			Nextion_SendString("t0", angle_to_display);
+			//encoder_display_angle(counter);
+		}
 	}
-
-
-
-	/*static uint8_t stan = 0;
-
-	if(HAL_GetTick() - nextion_delay_time > 1000) {
-
-		nextion_delay_time = HAL_GetTick();
-
-		if(!stan)
-			Nextion_SendString("t0","Hello");
-		else
-			Nextion_SendString("t0","World");
-
-		stan = !stan;
-	}*/
 
   }
   /* USER CODE END 3 */
@@ -191,7 +180,23 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if(huart->Instance == USART1) {
 
+		if(Rx_Data[2] == 0x02)
+			page_switch = 1;
+		else if(Rx_Data[2] == 0x03)
+			  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+		else if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x04)
+			  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x04)
+			page_switch = 0;
+
+		HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
+	}
+
+}
 /* USER CODE END 4 */
 
 /**

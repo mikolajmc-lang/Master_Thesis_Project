@@ -18,7 +18,7 @@ void Nextion_SendString(char *ID, float info)
 {
 	char buf[50];
 
-	int len = sprintf(buf, "%s.txt=\"%.f\"", ID, info);
+	int len = sprintf(buf, "%s.txt=\"Angle: %.f\"", ID, info);
 
 	HAL_UART_Transmit(&huart1, (uint8_t*)buf, len, 100);
 	HAL_UART_Transmit(&huart1, cmd_end, 3, 100);
