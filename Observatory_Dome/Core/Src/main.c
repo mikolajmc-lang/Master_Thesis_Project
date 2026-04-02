@@ -48,6 +48,7 @@
 
 /* USER CODE BEGIN PV */
 uint8_t Rx_Data[4];
+uint8_t ASCOM_Data[8];
 uint8_t page_switch = 0;
 
 uint32_t delay_time = 0;
@@ -124,7 +125,7 @@ int main(void)
 
 			delay_time = HAL_GetTick();
 
-			Nextion_SendString("t0", angle_to_display);
+			Nextion_SendString("x0", angle_to_display);
 			//encoder_display_angle(counter);
 		}
 	}

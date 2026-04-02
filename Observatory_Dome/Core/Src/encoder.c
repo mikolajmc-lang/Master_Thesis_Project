@@ -24,7 +24,7 @@ uint16_t encoder_cnt_get()
 
 float encoder_angle_get(uint16_t positioning)
 {
-	float angle = (float) (360.0/80.0)* positioning;
+	float angle = (float) ((360.0/14400.0)* positioning)*10;
 
 	return angle;
 }
@@ -32,8 +32,8 @@ float encoder_angle_get(uint16_t positioning)
 void encoder_display_angle(uint16_t position)
 {
 	char bufor_danych[64];
-	float angle = (float)(360.0/80.0)* position;
+	float angle = (float)(360.0/14400.0)* position;
 
-	snprintf(bufor_danych, sizeof(bufor_danych), "Angle: %.f \r\n", angle);
+	snprintf(bufor_danych, sizeof(bufor_danych), "Angle: %.2f \r\n", angle);
 	HAL_UART_Transmit(&huart2, (uint8_t*)bufor_danych, strlen(bufor_danych), 50);
 }
