@@ -55,6 +55,11 @@ uint32_t delay_time = 0;
 uint32_t nextion_delay_time = 0;
 uint16_t counter = 0;
 
+uint16_t pwm_signal_1 = 0;
+uint16_t pwm_signal_2 = 0;
+uint16_t pwm_value_1 = 1;
+uint16_t pwm_value_2 = 1;
+
 float angle_to_display = 0;
 /* USER CODE END PV */
 
@@ -104,9 +109,12 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM3_Init();
   MX_USART1_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -126,10 +134,27 @@ int main(void)
 			delay_time = HAL_GetTick();
 
 			Nextion_SendString("x0", angle_to_display);
+
+			static uint8_t pwm_state = 0;
+
+			if(pwm_value_1 == 100 && pwm_value_2 == 100)
+				pwm_state = 1;
+			else if(pwm_value_1 == 0 && pwm_value_2 == 0)
+				pwm_state = 0;
+
+			if(pwm_state){
+				pwm_value_1--;
+				pwm_value_2--;
+			} else {
+				pwm_value_1++;
+				pwm_value_2++;
+			}
 			//encoder_display_angle(counter);
 		}
 	}
 
+	pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
+	pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
   }
   /* USER CODE END 3 */
 }
