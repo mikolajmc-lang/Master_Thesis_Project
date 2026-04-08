@@ -134,21 +134,6 @@ int main(void)
 			delay_time = HAL_GetTick();
 
 			Nextion_SendString("x0", angle_to_display);
-
-			static uint8_t pwm_state = 0;
-
-			if(pwm_value_1 == 100 && pwm_value_2 == 100)
-				pwm_state = 1;
-			else if(pwm_value_1 == 0 && pwm_value_2 == 0)
-				pwm_state = 0;
-
-			if(pwm_state){
-				pwm_value_1--;
-				pwm_value_2--;
-			} else {
-				pwm_value_1++;
-				pwm_value_2++;
-			}
 			//encoder_display_angle(counter);
 		}
 	}
