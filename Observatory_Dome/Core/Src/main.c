@@ -18,6 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
+#include "dma.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -47,9 +49,12 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+
+// user test values
 uint8_t Rx_Data[4];
 uint8_t ASCOM_Data[8];
 uint8_t page_switch = 0;
+uint8_t test = 0;
 
 uint32_t delay_time = 0;
 uint32_t nextion_delay_time = 0;
@@ -60,7 +65,10 @@ uint16_t pwm_signal_2 = 0;
 uint16_t pwm_value_1 = 1;
 uint16_t pwm_value_2 = 1;
 
+uint16_t current_engine_value = 0;
+
 float angle_to_display = 0;
+float converted_value = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -106,13 +114,16 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_TIM3_Init();
   MX_USART1_UART_Init();
   MX_TIM2_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&current_engine_value, 1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   /* USER CODE END 2 */
@@ -138,8 +149,10 @@ int main(void)
 		}
 	}
 
-	pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
-	pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
+	//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
+	//pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
+
+	converted_value = (float)current_engine_value*(2000.0/4095.0);
   }
   /* USER CODE END 3 */
 }
@@ -198,9 +211,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		if(Rx_Data[2] == 0x02)
 			page_switch = 1;
 		else if(Rx_Data[2] == 0x03)
-			  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+				test = 0;
+			  //HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 		else if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x04)
-			  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+				test = 1;
+			  //HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x04)
 			page_switch = 0;
 
