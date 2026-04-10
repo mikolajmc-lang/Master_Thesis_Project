@@ -65,10 +65,11 @@ uint16_t pwm_signal_2 = 0;
 uint16_t pwm_value_1 = 1;
 uint16_t pwm_value_2 = 1;
 
-uint16_t current_engine_value = 0;
+uint16_t current_engine_value[2];
 
 float angle_to_display = 0;
-float converted_value = 0;
+float amps_0 = 0;
+float amps_1 = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -123,7 +124,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&current_engine_value, 1);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)current_engine_value, 2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   /* USER CODE END 2 */
@@ -148,11 +149,18 @@ int main(void)
 			//encoder_display_angle(counter);
 		}
 	}
-
+	float alpha = 0.1;
 	//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
 	//pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
+	static float filtered_value_0 = 2160;
+	static float filtered_value_1 = 2160;
+	// filtr cyfrowy 1 rzędu
+	filtered_value_0 = (alpha * current_engine_value[0]) + ((1.0 - alpha) * filtered_value_0);
+	filtered_value_1 = (alpha * current_engine_value[1]) + ((1.0 - alpha) * filtered_value_1);
 
-	converted_value = (float)current_engine_value*(2000.0/4095.0);
+	// skalowanie pradu - wzór funkcji liniowej
+	amps_0 = (float)((20.0/1927.0)*filtered_value_0 - 22.5);
+	amps_1 = (float)((20.0/1927.0)*filtered_value_1 - 22.5);
   }
   /* USER CODE END 3 */
 }
