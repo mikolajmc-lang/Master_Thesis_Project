@@ -51,13 +51,17 @@
 /* USER CODE BEGIN PV */
 
 // user test values
+
+uint8_t amp_waveform = 0;
+uint8_t amp_waveform_1 = 0;
+
 uint8_t Rx_Data[4];
 uint8_t ASCOM_Data[8];
-uint8_t page_switch = 0;
-uint8_t test = 0;
+volatile uint8_t waveform_enable = 0;
+volatile uint8_t page_switch = 0;
 
-uint32_t delay_time = 0;
-uint32_t nextion_delay_time = 0;
+uint32_t wave_delay_time_0 = 0;
+uint32_t wave_delay_time_1 = 0;
 uint16_t counter = 0;
 
 uint16_t pwm_signal_1 = 0;
@@ -79,6 +83,7 @@ uint16_t encoder_cnt_get();
 float encoder_angle_get(uint16_t positioning);
 void encoder_display_angle(uint16_t position);
 void Nextion_SendString(char *ID, float info);
+void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -141,15 +146,15 @@ int main(void)
 	angle_to_display = encoder_angle_get(counter);
 
 	if(page_switch) {
-		if(HAL_GetTick() - delay_time > 20) {
+		if(HAL_GetTick() - wave_delay_time_0 > 20) {
 
-			delay_time = HAL_GetTick();
+			wave_delay_time_0 = HAL_GetTick();
 
 			Nextion_SendString("x0", angle_to_display);
 			//encoder_display_angle(counter);
 		}
 	}
-	float alpha = 0.1;
+	float alpha = 0.05;
 	//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
 	//pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
 	static float filtered_value_0 = 2160;
@@ -161,6 +166,18 @@ int main(void)
 	// skalowanie pradu - wzór funkcji liniowej
 	amps_0 = (float)((20.0/1927.0)*filtered_value_0 - 22.5);
 	amps_1 = (float)((20.0/1927.0)*filtered_value_1 - 22.5);
+
+	amp_waveform = (uint8_t)(255.0/42.0)*amps_0 + 22.0*(255.0/42.0);
+	amp_waveform_1 = (uint8_t)(255.0/42.0)*amps_1 + 22.0*(255.0/42.0);
+
+	if(waveform_enable) {
+
+		if(HAL_GetTick() - wave_delay_time_0 > 15) {
+			wave_delay_time_0 = HAL_GetTick();
+			Nextion_Waveform(amp_waveform,amp_waveform_1);
+		}
+	}
+
   }
   /* USER CODE END 3 */
 }
@@ -216,16 +233,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart->Instance == USART1) {
 
-		if(Rx_Data[2] == 0x02)
+		if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x02)
 			page_switch = 1;
-		else if(Rx_Data[2] == 0x03)
-				test = 0;
-			  //HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-		else if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x04)
-				test = 1;
-			  //HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x04)
 			page_switch = 0;
+		else if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x06)
+			waveform_enable = 1;
+		else if(Rx_Data[1] == 0x02 && Rx_Data[2] == 0x03)
+			waveform_enable = 0;
 
 		HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
 	}
