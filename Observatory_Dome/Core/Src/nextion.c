@@ -13,6 +13,7 @@
 #include <encoder.h>
 #include <nextion.h>
 
+
 uint8_t cmd_end[3] = {0xFF,0xFF,0xFF}; // command end sequence
 
 void Nextion_SendString(char *ID, float info)
@@ -21,6 +22,17 @@ void Nextion_SendString(char *ID, float info)
 
 	if(huart1.gState == HAL_UART_STATE_READY) {
 		int len = sprintf(buf, "%s.val=%.f\xFF\xFF\xFF", ID, info);
+
+		HAL_UART_Transmit_DMA(&huart1, (uint8_t*)buf, len);
+	}
+}
+
+void Nextion_SendString_Current(int16_t current1, int16_t current2)
+{
+	static char buf[50];
+
+	if(huart1.gState == HAL_UART_STATE_READY) {
+		int len = sprintf(buf, "x0.val=%d\xFF\xFF\xFF" "x1.val=%d\xFF\xFF\xFF", current1, current2);
 
 		HAL_UART_Transmit_DMA(&huart1, (uint8_t*)buf, len);
 	}

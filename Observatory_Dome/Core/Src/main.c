@@ -74,6 +74,9 @@ uint16_t current_engine_value[2];
 float angle_to_display = 0;
 float amps_0 = 0;
 float amps_1 = 0;
+
+int16_t amps_to_display_0 = 0;
+int16_t amps_to_display_1 = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -84,6 +87,7 @@ float encoder_angle_get(uint16_t positioning);
 void encoder_display_angle(uint16_t position);
 void Nextion_SendString(char *ID, float info);
 void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
+void Nextion_SendString_Current(int16_t current1, int16_t current2);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -167,6 +171,9 @@ int main(void)
 	amps_0 = (float)((20.0/1927.0)*filtered_value_0 - 22.5);
 	amps_1 = (float)((20.0/1927.0)*filtered_value_1 - 22.5);
 
+	amps_to_display_0 = (int16_t)(amps_0*100);
+	amps_to_display_1 = (int16_t)(amps_1*100);
+
 	amp_waveform = (uint8_t)(255.0/42.0)*amps_0 + 22.0*(255.0/42.0);
 	amp_waveform_1 = (uint8_t)(255.0/42.0)*amps_1 + 22.0*(255.0/42.0);
 
@@ -174,7 +181,12 @@ int main(void)
 
 		if(HAL_GetTick() - wave_delay_time_0 > 15) {
 			wave_delay_time_0 = HAL_GetTick();
-			Nextion_Waveform(amp_waveform,amp_waveform_1);
+			Nextion_Waveform(amp_waveform, amp_waveform_1);
+		}
+
+		if(HAL_GetTick() - wave_delay_time_1 > 20) {
+			wave_delay_time_1 = HAL_GetTick();
+			Nextion_SendString_Current(amps_to_display_0, amps_to_display_1);
 		}
 	}
 
