@@ -12,6 +12,7 @@
 #include <encoder.h>
 #include <nextion.h>
 
+#define alpha 0.05
 
 
 uint16_t encoder_cnt_get()
@@ -27,6 +28,21 @@ float encoder_angle_get(uint16_t positioning)
 	float angle = (float) ((360.0/14400.0)* positioning)*10;
 
 	return angle;
+}
+
+float get_current_offset(uint16_t dma_adc_index, float offset)
+{
+	offset = (alpha * dma_adc_index) + ((1.0 - alpha) * offset);
+
+	return offset;
+}
+
+float get_amps(float filter_value)
+{
+	// skalowanie pradu - wzór funkcji liniowej
+	float amp = (float)((20.0/1927.0)*filter_value - 22.5);
+
+	return amp;
 }
 
 void encoder_display_angle(uint16_t position)

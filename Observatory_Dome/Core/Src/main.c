@@ -71,6 +71,8 @@ uint16_t pwm_value_2 = 1;
 
 uint16_t current_engine_value[2];
 
+float filtered_value_0 = 2160;
+float filtered_value_1 = 2160;
 float angle_to_display = 0;
 float amps_0 = 0;
 float amps_1 = 0;
@@ -84,6 +86,8 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 uint16_t encoder_cnt_get();
 float encoder_angle_get(uint16_t positioning);
+float get_current_offset(uint16_t dma_adc_index, float offset);
+float get_amps(float filter_value);
 void encoder_display_angle(uint16_t position);
 void Nextion_SendString(char *ID, float info);
 void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
@@ -158,18 +162,19 @@ int main(void)
 			//encoder_display_angle(counter);
 		}
 	}
-	float alpha = 0.05;
+
 	//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
 	//pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
-	static float filtered_value_0 = 2160;
-	static float filtered_value_1 = 2160;
+
 	// filtr cyfrowy 1 rzędu
-	filtered_value_0 = (alpha * current_engine_value[0]) + ((1.0 - alpha) * filtered_value_0);
-	filtered_value_1 = (alpha * current_engine_value[1]) + ((1.0 - alpha) * filtered_value_1);
 
 	// skalowanie pradu - wzór funkcji liniowej
-	amps_0 = (float)((20.0/1927.0)*filtered_value_0 - 22.5);
-	amps_1 = (float)((20.0/1927.0)*filtered_value_1 - 22.5);
+
+	filtered_value_0 = get_current_offset(current_engine_value[0], filtered_value_0);
+	filtered_value_1 = get_current_offset(current_engine_value[1], filtered_value_1);
+
+	amps_0 = get_amps(filtered_value_0);
+	amps_1 = get_amps(filtered_value_1);
 
 	amps_to_display_0 = (int16_t)(amps_0*100);
 	amps_to_display_1 = (int16_t)(amps_1*100);
