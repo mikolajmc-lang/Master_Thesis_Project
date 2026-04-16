@@ -23,6 +23,13 @@ uint16_t encoder_cnt_get()
 	return cnt;
 }
 
+float encoder_ASCOM_preset(float angle_position)
+{
+	float angle = angle_position*10;
+
+	return angle;
+}
+
 float encoder_angle_get(uint16_t positioning)
 {
 	float angle = (float) ((360.0/14400.0)* positioning)*10;

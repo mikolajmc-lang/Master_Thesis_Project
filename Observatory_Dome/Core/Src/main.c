@@ -26,6 +26,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdlib.h>
 #include <stdio.h>
 #include <nextion.h>
 #include <encoder.h>
@@ -38,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define ASCOM_Buffer 10
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,16 +53,22 @@
 
 // user test values
 
+uint8_t angle_conversion_flag = 0;
+
 uint8_t amp_waveform = 0;
 uint8_t amp_waveform_1 = 0;
 
 uint8_t Rx_Data[4];
-uint8_t ASCOM_Data[8];
+uint8_t ASCOM_Data[ASCOM_Buffer];
+uint8_t ASCOM_Index = 0;
+uint8_t ASCOM_Byte = 0;
+uint16_t UART_value = 0;
 volatile uint8_t waveform_enable = 0;
 volatile uint8_t page_switch = 0;
 
 uint32_t wave_delay_time_0 = 0;
 uint32_t wave_delay_time_1 = 0;
+uint32_t preset_delay_time = 0;
 uint16_t counter = 0;
 
 uint16_t pwm_signal_1 = 0;
@@ -71,9 +78,11 @@ uint16_t pwm_value_2 = 1;
 
 uint16_t current_engine_value[2];
 
+float string_to_angle = 0;
 float filtered_value_0 = 2160;
 float filtered_value_1 = 2160;
 float angle_to_display = 0;
+float preset_to_display = 0;
 float amps_0 = 0;
 float amps_1 = 0;
 
@@ -88,6 +97,7 @@ uint16_t encoder_cnt_get();
 float encoder_angle_get(uint16_t positioning);
 float get_current_offset(uint16_t dma_adc_index, float offset);
 float get_amps(float filter_value);
+float encoder_ASCOM_preset(float angle_position);
 void encoder_display_angle(uint16_t position);
 void Nextion_SendString(char *ID, float info);
 void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
@@ -137,6 +147,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
+  HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)current_engine_value, 2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
@@ -149,9 +160,19 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    if(angle_conversion_flag){
+
+    	string_to_angle = atof((char*)ASCOM_Data);
+
+    	memset(ASCOM_Data, 0, ASCOM_Buffer);
+    	ASCOM_Index = 0;
+    	angle_conversion_flag = 0;
+    }
+
 
 	counter = encoder_cnt_get();
 	angle_to_display = encoder_angle_get(counter);
+	preset_to_display = encoder_ASCOM_preset(string_to_angle);
 
 	if(page_switch) {
 		if(HAL_GetTick() - wave_delay_time_0 > 20) {
@@ -160,6 +181,12 @@ int main(void)
 
 			Nextion_SendString("x0", angle_to_display);
 			//encoder_display_angle(counter);
+		}
+
+		if(HAL_GetTick() - preset_delay_time > 50) {
+			preset_delay_time = HAL_GetTick();
+
+			Nextion_SendString("x1", preset_to_display);
 		}
 	}
 
@@ -262,6 +289,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
 	}
 
+	if(huart->Instance == USART2) {
+
+	  //UART_value = (uint16_t)(Rx_Test_Data[0] << 8 | Rx_Test_Data[1]);
+		if(ASCOM_Byte == '\n'){
+			angle_conversion_flag = 1;
+		} else {
+			ASCOM_Data[ASCOM_Index++] = ASCOM_Byte;
+		}
+
+		HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
+	}
 }
 /* USER CODE END 4 */
 
