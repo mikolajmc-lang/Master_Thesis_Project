@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <nextion.h>
 #include <encoder.h>
+#include <vl53l0x_api.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -121,7 +122,7 @@ void tof_data_request(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+VL53L0X_RangingMeasurementData_t RangingData;
 /* USER CODE END 0 */
 
 /**
@@ -161,8 +162,8 @@ int main(void)
   MX_ADC1_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
-  //i2c_check();
+  HAL_Delay(5);
+  i2c_check();
 
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);

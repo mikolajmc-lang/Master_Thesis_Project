@@ -12,10 +12,18 @@
 
 #include <encoder.h>
 #include <nextion.h>
+#include <vl53l0x_api.h>
 
 #define alpha 0.05
 
 extern uint8_t ToF_Data[2];
+
+
+void tof_sensor_init()
+{
+	VL53L0X_DataInit(0);
+	VL53L0X_StaticInit(0);
+}
 
 void i2c_check()
 {
