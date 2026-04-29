@@ -15,6 +15,7 @@
 #define alpha 0.05
 
 
+
 uint16_t encoder_cnt_get()
 {
 	uint16_t cnt = 0;
@@ -60,3 +61,17 @@ void encoder_display_angle(uint16_t position)
 	snprintf(bufor_danych, sizeof(bufor_danych), "Angle: %.2f \r\n", angle);
 	HAL_UART_Transmit(&huart2, (uint8_t*)bufor_danych, strlen(bufor_danych), 50);
 }
+
+void ride_left()
+{
+	  HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_SET);
+}
+
+void ride_right()
+{
+	  HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_SET);
+}
+
+

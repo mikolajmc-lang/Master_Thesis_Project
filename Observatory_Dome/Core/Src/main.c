@@ -54,6 +54,8 @@
 // user test values
 
 uint8_t angle_conversion_flag = 0;
+uint8_t ride_left_flag = 0;
+uint8_t ride_right_flag = 0;
 
 uint8_t amp_waveform = 0;
 uint8_t amp_waveform_1 = 0;
@@ -71,10 +73,11 @@ uint32_t wave_delay_time_1 = 0;
 uint32_t preset_delay_time = 0;
 uint16_t counter = 0;
 
+
 uint16_t pwm_signal_1 = 0;
 uint16_t pwm_signal_2 = 0;
-uint16_t pwm_value_1 = 1;
-uint16_t pwm_value_2 = 1;
+uint16_t pwm_value_1 = 255;
+uint16_t pwm_value_2 = 255;
 
 uint16_t current_engine_value[2];
 
@@ -86,6 +89,7 @@ float preset_to_display = 0;
 float amps_0 = 0;
 float amps_1 = 0;
 
+int16_t half = 180.0;
 int16_t amps_to_display_0 = 0;
 int16_t amps_to_display_1 = 0;
 /* USER CODE END PV */
@@ -102,6 +106,8 @@ void encoder_display_angle(uint16_t position);
 void Nextion_SendString(char *ID, float info);
 void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
 void Nextion_SendString_Current(int16_t current1, int16_t current2);
+void ride_left(void);
+void ride_right(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -160,6 +166,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	static uint8_t comparision_mode = 1;
+
     if(angle_conversion_flag){
 
     	string_to_angle = atof((char*)ASCOM_Data);
@@ -187,6 +195,43 @@ int main(void)
 			preset_delay_time = HAL_GetTick();
 
 			Nextion_SendString("x1", preset_to_display);
+		}
+
+		if(angle_to_display == preset_to_display) {
+			pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
+			ride_left_flag = 0;	// Zerowanie flag jazdy silnikiem w lewo
+			ride_right_flag = 0; // Zerowanie flag jazdy silnikiem w prawo
+			comparision_mode = 1;
+		}
+		else {
+			float delta = preset_to_display - angle_to_display;
+
+			if(comparision_mode) {
+
+				if(delta > 1800.0){
+					delta = delta - 3600.0;
+				} else if(delta < - 1800.0){
+					delta = delta + 3600.0;
+				}
+
+				if(delta < 0.0) {
+					ride_left_flag = 1;
+					comparision_mode = 0;
+				}
+				else if(delta > 0.0) {
+					ride_right_flag = 1;
+					comparision_mode = 0;
+				}
+
+			}
+
+			if(ride_left_flag)
+				ride_left();
+
+			if(ride_right_flag)
+				ride_right();
+
+			pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
 		}
 	}
 
