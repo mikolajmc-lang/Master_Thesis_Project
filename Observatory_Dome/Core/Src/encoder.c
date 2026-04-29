@@ -8,13 +8,31 @@
 #include "main.h"
 #include "usart.h"
 #include "tim.h"
+#include "i2c.h"
 
 #include <encoder.h>
 #include <nextion.h>
 
 #define alpha 0.05
 
+extern uint8_t ToF_Data[2];
 
+void i2c_check()
+{
+	uint8_t tof_data = 0;
+
+	HAL_StatusTypeDef status = HAL_I2C_Master_Receive(&hi2c1, 0x53, &tof_data, 1, 100);
+
+	if(status == HAL_OK)
+	  HAL_UART_Transmit(&huart2, (uint8_t*)"OK.\r\n", strlen("OK.\r\n"), 100);
+	else
+	  HAL_UART_Transmit(&huart2, (uint8_t*)"FAILED.\r\n", strlen("FAILED.\r\n"), 100);
+}
+
+void tof_data_request()
+{
+	HAL_I2C_Mem_Read_DMA(&hi2c1, 0x52, 0x14, I2C_MEMADD_SIZE_8BIT, ToF_Data, 2);
+}
 
 uint16_t encoder_cnt_get()
 {

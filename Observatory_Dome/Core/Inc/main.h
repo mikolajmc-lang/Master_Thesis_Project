@@ -79,7 +79,7 @@ void Error_Handler(void);
 #define TCK_GPIO_Port GPIOA
 #define ENGINE1P_Pin GPIO_PIN_6
 #define ENGINE1P_GPIO_Port GPIOB
-#define ENGINE2P_Pin GPIO_PIN_9
+#define ENGINE2P_Pin GPIO_PIN_7
 #define ENGINE2P_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */

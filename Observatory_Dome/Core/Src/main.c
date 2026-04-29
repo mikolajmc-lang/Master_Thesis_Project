@@ -20,6 +20,7 @@
 #include "main.h"
 #include "adc.h"
 #include "dma.h"
+#include "i2c.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -53,12 +54,17 @@
 
 // user test values
 
+uint8_t i2c_transmit_flag = 0;
 uint8_t angle_conversion_flag = 0;
 uint8_t ride_left_flag = 0;
 uint8_t ride_right_flag = 0;
 
 uint8_t amp_waveform = 0;
 uint8_t amp_waveform_1 = 0;
+
+
+volatile uint8_t ToF_Data[2];
+volatile uint16_t ToF_Measurement = 0;
 
 uint8_t Rx_Data[4];
 uint8_t ASCOM_Data[ASCOM_Buffer];
@@ -68,11 +74,11 @@ uint16_t UART_value = 0;
 volatile uint8_t waveform_enable = 0;
 volatile uint8_t page_switch = 0;
 
+uint32_t ToF_delay_time = 0;
 uint32_t wave_delay_time_0 = 0;
 uint32_t wave_delay_time_1 = 0;
 uint32_t preset_delay_time = 0;
 uint16_t counter = 0;
-
 
 uint16_t pwm_signal_1 = 0;
 uint16_t pwm_signal_2 = 0;
@@ -108,6 +114,9 @@ void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
 void Nextion_SendString_Current(int16_t current1, int16_t current2);
 void ride_left(void);
 void ride_right(void);
+void i2c_check(void);
+void tof_data_request(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -150,7 +159,11 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM2_Init();
   MX_ADC1_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+
+  //i2c_check();
+
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
   HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
@@ -166,6 +179,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	if(HAL_GetTick() - ToF_delay_time > 75)
+	{
+		ToF_delay_time = HAL_GetTick();
+		tof_data_request();
+	}
+
 	static uint8_t comparision_mode = 1;
 
     if(angle_conversion_flag){
@@ -344,6 +364,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		}
 
 		HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
+	}
+}
+
+void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+	if(hi2c ->Instance == I2C1)
+	{
+		ToF_Measurement = ToF_Data[0] << 8 | ToF_Data[1];
 	}
 }
 /* USER CODE END 4 */
