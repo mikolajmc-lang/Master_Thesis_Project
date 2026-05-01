@@ -19,12 +19,6 @@
 extern uint8_t ToF_Data[2];
 
 
-void tof_sensor_init()
-{
-	VL53L0X_DataInit(0);
-	VL53L0X_StaticInit(0);
-}
-
 void i2c_check()
 {
 	uint8_t tof_data = 0;

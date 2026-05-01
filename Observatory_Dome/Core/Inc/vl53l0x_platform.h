@@ -1,5 +1,5 @@
 /*******************************************************************************
-Copyright © 2015, STMicroelectronics International N.V.
+Copyright ï¿½ 2015, STMicroelectronics International N.V.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -30,6 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef _VL53L0X_PLATFORM_H_
 #define _VL53L0X_PLATFORM_H_
 
+#include "i2c.h"
 #include "vl53l0x_def.h"
 #include "vl53l0x_platform_log.h"
 #include "vl53l0x_i2c_platform.h"
@@ -59,6 +60,7 @@ typedef struct {
     VL53L0X_DevData_t Data;               /*!< embed ST Ewok Dev  data as "Data"*/
 
     /*!< user specific field */
+    I2C_HandleTypeDef *I2CHandle;
     uint8_t   I2cDevAddr;                /*!< i2c device address user specific field */
     uint8_t   comms_type;                /*!< Type of comms : VL53L0X_COMMS_I2C or VL53L0X_COMMS_SPI */
     uint16_t  comms_speed_khz;           /*!< Comms speed [kHz] : typically 400kHz for I2C           */

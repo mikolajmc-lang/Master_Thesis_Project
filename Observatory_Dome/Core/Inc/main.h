@@ -77,6 +77,8 @@ void Error_Handler(void);
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
+#define XSHUT_Pin GPIO_PIN_5
+#define XSHUT_GPIO_Port GPIOB
 #define ENGINE1P_Pin GPIO_PIN_6
 #define ENGINE1P_GPIO_Port GPIOB
 #define ENGINE2P_Pin GPIO_PIN_7

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright © 2016, STMicroelectronics International N.V.
+ * Copyright ï¿½ 2016, STMicroelectronics International N.V.
  All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
@@ -28,6 +28,7 @@
 
 #include "vl53l0x_api.h"
 #include "vl53l0x_tuning.h"
+#include "vl53l0x_platform.h"
 #include "vl53l0x_interrupt_threshold_settings.h"
 #include "vl53l0x_api_core.h"
 #include "vl53l0x_api_calibration.h"

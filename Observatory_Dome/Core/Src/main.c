@@ -32,6 +32,7 @@
 #include <nextion.h>
 #include <encoder.h>
 #include <vl53l0x_api.h>
+#include <vl53l0x_platform.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -123,6 +124,56 @@ void tof_data_request(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 VL53L0X_RangingMeasurementData_t RangingData;
+VL53L0X_Dev_t mySensor;
+VL53L0X_DEV pDev = &mySensor;
+
+void tof_sensor_init(VL53L0X_DEV Dev)
+{
+	  uint32_t refSpadCount;
+	  uint8_t isApertureSpads;
+	  uint8_t VhvSettings;
+	  uint8_t PhaseCal;
+
+	  VL53L0X_Error status = VL53L0X_ResetDevice(Dev);
+
+	  if(status == VL53L0X_ERROR_NONE){
+		 HAL_Delay(5);
+		 status = VL53L0X_DataInit(Dev);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		 status = VL53L0X_StaticInit(Dev);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		 status = VL53L0X_PerformRefSpadManagement(Dev, &refSpadCount, &isApertureSpads);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		 status = VL53L0X_PerformRefCalibration(Dev, &VhvSettings, &PhaseCal);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		 status = VL53L0X_SetDeviceMode(Dev, VL53L0X_DEVICEMODE_SINGLE_RANGING);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		 status = VL53L0X_SetMeasurementTimingBudgetMicroSeconds(Dev, 33000);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		 status = VL53L0X_SetLimitCheckEnable(Dev, VL53L0X_CHECKENABLE_SIGMA_FINAL_RANGE, 1);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		 status = VL53L0X_SetLimitCheckEnable(Dev, VL53L0X_CHECKENABLE_SIGNAL_RATE_FINAL_RANGE, 1);
+	  }
+	  if(status == VL53L0X_ERROR_NONE) {
+		  status = VL53L0X_SetLimitCheckValue(Dev, VL53L0X_CHECKENABLE_SIGNAL_RATE_FINAL_RANGE,(FixPoint1616_t)(0.1*65536));
+	  }
+	  if (status == VL53L0X_ERROR_NONE) {
+		  status = VL53L0X_SetLimitCheckValue(Dev, VL53L0X_CHECKENABLE_SIGMA_FINAL_RANGE, (FixPoint1616_t)(60*65536));
+	  }
+	  if (status == VL53L0X_ERROR_NONE) {
+		  status = VL53L0X_SetVcselPulsePeriod(Dev, VL53L0X_VCSEL_PERIOD_PRE_RANGE, 18);
+	  }
+	  if (status == VL53L0X_ERROR_NONE) {
+		  status = VL53L0X_SetVcselPulsePeriod(Dev, VL53L0X_VCSEL_PERIOD_FINAL_RANGE, 14);
+	  }
+}
 /* USER CODE END 0 */
 
 /**
@@ -133,7 +184,10 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  pDev->I2CHandle = &hi2c1;
+  pDev->I2cDevAddr = 0x52; //Adres czujnika ToF
+  pDev->comms_type = 1;
+  pDev->comms_speed_khz = 400;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -163,7 +217,8 @@ int main(void)
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(5);
-  i2c_check();
+  tof_sensor_init(pDev);
+  //i2c_check();
 
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
@@ -181,11 +236,18 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	if(HAL_GetTick() - ToF_delay_time > 75)
+
+	VL53L0X_Error status = VL53L0X_PerformSingleRangingMeasurement(pDev, &RangingData);
+
+	if(status == VL53L0X_ERROR_NONE){
+		uint16_t distance = RangingData.RangeMilliMeter;
+	}
+
+	/*if(HAL_GetTick() - ToF_delay_time > 75)
 	{
 		ToF_delay_time = HAL_GetTick();
-		tof_data_request();
-	}
+		//tof_data_request();
+	}*/
 
 	static uint8_t comparision_mode = 1;
 
