@@ -31,11 +31,6 @@ void i2c_check()
 	  HAL_UART_Transmit(&huart2, (uint8_t*)"FAILED.\r\n", strlen("FAILED.\r\n"), 100);
 }
 
-void tof_data_request()
-{
-	HAL_I2C_Mem_Read_DMA(&hi2c1, 0x52, 0x14, I2C_MEMADD_SIZE_8BIT, ToF_Data, 2);
-}
-
 uint16_t encoder_cnt_get()
 {
 	uint16_t cnt = 0;

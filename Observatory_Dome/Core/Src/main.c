@@ -100,6 +100,8 @@ float amps_1 = 0;
 int16_t half = 180.0;
 int16_t amps_to_display_0 = 0;
 int16_t amps_to_display_1 = 0;
+
+uint16_t tof_distance_mm = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -117,8 +119,6 @@ void Nextion_SendString_Current(int16_t current1, int16_t current2);
 void ride_left(void);
 void ride_right(void);
 void i2c_check(void);
-void tof_data_request(void);
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -134,12 +134,8 @@ void tof_sensor_init(VL53L0X_DEV Dev)
 	  uint8_t VhvSettings;
 	  uint8_t PhaseCal;
 
-	  VL53L0X_Error status = VL53L0X_ResetDevice(Dev);
+	  VL53L0X_Error status = VL53L0X_DataInit(Dev);
 
-	  if(status == VL53L0X_ERROR_NONE){
-		 HAL_Delay(5);
-		 status = VL53L0X_DataInit(Dev);
-	  }
 	  if(status == VL53L0X_ERROR_NONE) {
 		 status = VL53L0X_StaticInit(Dev);
 	  }
@@ -174,6 +170,19 @@ void tof_sensor_init(VL53L0X_DEV Dev)
 		  status = VL53L0X_SetVcselPulsePeriod(Dev, VL53L0X_VCSEL_PERIOD_FINAL_RANGE, 14);
 	  }
 }
+
+uint16_t tof_data_request()
+{
+	uint16_t distance;
+	VL53L0X_Error status = VL53L0X_PerformSingleRangingMeasurement(pDev, &RangingData);
+
+	if(status == VL53L0X_ERROR_NONE){
+		distance = RangingData.RangeMilliMeter;
+	}
+
+	return distance;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -216,7 +225,13 @@ int main(void)
   MX_ADC1_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_Delay(5);
+
+  // Sprzętowy reset czujnika ToF
+  HAL_GPIO_WritePin(GPIOB, XSHUT_Pin, GPIO_PIN_RESET);
+  HAL_Delay(20);
+  HAL_GPIO_WritePin(GPIOB, XSHUT_Pin, GPIO_PIN_SET);
+  HAL_Delay(20);
+
   tof_sensor_init(pDev);
   //i2c_check();
 
@@ -236,18 +251,11 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-
-	VL53L0X_Error status = VL53L0X_PerformSingleRangingMeasurement(pDev, &RangingData);
-
-	if(status == VL53L0X_ERROR_NONE){
-		uint16_t distance = RangingData.RangeMilliMeter;
-	}
-
-	/*if(HAL_GetTick() - ToF_delay_time > 75)
+	if(HAL_GetTick() - ToF_delay_time > 100)
 	{
 		ToF_delay_time = HAL_GetTick();
-		//tof_data_request();
-	}*/
+		tof_distance_mm = tof_data_request();
+	}
 
 	static uint8_t comparision_mode = 1;
 
