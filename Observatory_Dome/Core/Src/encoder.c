@@ -79,14 +79,76 @@ void encoder_display_angle(uint16_t position)
 
 void ride_left()
 {
-	  HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_RESET);
-	  HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, ENGINE2L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_SET);
 }
 
 void ride_right()
 {
-	  HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_RESET);
-	  HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, ENGINE2L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_SET);
 }
 
+void ride_open()
+{
+	HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, ENGINE2L_Pin, GPIO_PIN_SET);
+}
+
+void ride_close()
+{
+	HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, ENGINE2L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_SET);
+}
+
+void dont_ride()
+{
+	HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, ENGINE2L_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
+}
+
+void soft_start_func(uint16_t *pwm, uint8_t channel, uint32_t *tick)
+{
+	if(HAL_GetTick() - *tick > 8){
+
+		if(*pwm < 400) {
+			(*pwm)++;
+
+			if(channel == 0)
+				__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, *pwm);
+			else
+				__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, *pwm);
+		}
+		*tick = HAL_GetTick();
+	}
+}
+
+
+void soft_stop_func(uint16_t *pwm, uint16_t *pwm2, uint32_t *tick)
+{
+	if(HAL_GetTick() - *tick > 8){
+
+		if(*pwm > 0){
+		--(*pwm);
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, *pwm);
+		}
+
+		if(*pwm2 > 0){
+		--(*pwm2);
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, *pwm2);
+		}
+
+		*tick = HAL_GetTick();
+	}
+}
 

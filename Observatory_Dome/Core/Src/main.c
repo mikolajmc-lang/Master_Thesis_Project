@@ -37,7 +37,12 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef enum {
+	TOF_IDLE,
+	TOF_TRIGGER_MEASURE,
+	TOF_WAIT_FOR_DATA,
+	TOF_GET_RESULT
+} ToF_State_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -61,6 +66,12 @@ uint8_t angle_conversion_flag = 0;
 uint8_t ride_left_flag = 0;
 uint8_t ride_right_flag = 0;
 
+uint8_t pwm_run_1 = 0;
+uint8_t pwm_run_2 = 0;
+uint8_t soft_start_automatic = 0;
+uint8_t soft_start = 0;
+uint8_t soft_stop = 0;
+
 uint8_t amp_waveform = 0;
 uint8_t amp_waveform_1 = 0;
 
@@ -73,9 +84,18 @@ uint8_t ASCOM_Data[ASCOM_Buffer];
 uint8_t ASCOM_Index = 0;
 uint8_t ASCOM_Byte = 0;
 uint16_t UART_value = 0;
-volatile uint8_t waveform_enable = 0;
-volatile uint8_t page_switch = 0;
 
+volatile uint8_t open = 0;
+volatile uint8_t close = 0;
+volatile uint8_t left = 0;
+volatile uint8_t right = 0;
+
+volatile uint8_t waveform_enable = 0;
+volatile uint8_t page_auto = 0;
+volatile uint8_t page_manual = 0;
+
+uint32_t tick_start_1 = 0, tick_stop_1 = 0;
+uint32_t ToF_Tick = 0;
 uint32_t ToF_delay_time = 0;
 uint32_t wave_delay_time_0 = 0;
 uint32_t wave_delay_time_1 = 0;
@@ -84,8 +104,8 @@ uint16_t counter = 0;
 
 uint16_t pwm_signal_1 = 0;
 uint16_t pwm_signal_2 = 0;
-uint16_t pwm_value_1 = 255;
-uint16_t pwm_value_2 = 255;
+uint16_t pwm_value_1 = 0;
+uint16_t pwm_value_2 = 0;
 
 uint16_t current_engine_value[2];
 
@@ -94,6 +114,7 @@ float filtered_value_0 = 2160;
 float filtered_value_1 = 2160;
 float angle_to_display = 0;
 float preset_to_display = 0;
+float distance_to_display = 0;
 float amps_0 = 0;
 float amps_1 = 0;
 
@@ -116,8 +137,13 @@ void encoder_display_angle(uint16_t position);
 void Nextion_SendString(char *ID, float info);
 void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
 void Nextion_SendString_Current(int16_t current1, int16_t current2);
+void soft_start_func(uint16_t *pwm, uint8_t channel, uint32_t *tick);
+void soft_stop_func(uint16_t *pwm, uint16_t *pwm2, uint32_t *tick);
 void ride_left(void);
 void ride_right(void);
+void ride_open(void);
+void ride_close(void);
+void dont_ride(void);
 void i2c_check(void);
 /* USER CODE END PFP */
 
@@ -171,13 +197,55 @@ void tof_sensor_init(VL53L0X_DEV Dev)
 	  }
 }
 
-uint16_t tof_data_request()
+uint16_t tof_data_request(void)
 {
 	uint16_t distance;
 	VL53L0X_Error status = VL53L0X_PerformSingleRangingMeasurement(pDev, &RangingData);
 
 	if(status == VL53L0X_ERROR_NONE){
 		distance = RangingData.RangeMilliMeter;
+	}
+
+	return distance;
+}
+
+uint16_t tof_data_request_nonblocking_mode(void)
+{
+	static ToF_State_t state = TOF_TRIGGER_MEASURE;
+	static uint32_t lastTick = 0;
+	static uint16_t distance = 0;
+
+	if(HAL_GetTick() - lastTick >= 25) {
+		switch(state) {
+			case TOF_TRIGGER_MEASURE:
+				if(VL53L0X_PerformSingleMeasurement(pDev) == VL53L0X_ERROR_NONE) {
+					state = TOF_WAIT_FOR_DATA;
+					//lastTick = HAL_GetTick();
+				}
+			break;
+
+			case TOF_WAIT_FOR_DATA:
+					uint8_t DataReady = 0;
+
+					VL53L0X_GetMeasurementDataReady(pDev, &DataReady);
+
+					if(DataReady){
+						state = TOF_GET_RESULT;
+					}
+			break;
+
+			case TOF_GET_RESULT:
+
+				if(VL53L0X_GetRangingMeasurementData(pDev, &RangingData) == VL53L0X_ERROR_NONE) {
+					distance = RangingData.RangeMilliMeter;
+				}
+				VL53L0X_ClearInterruptMask(pDev, 0);
+
+				state = TOF_TRIGGER_MEASURE;
+			break;
+		}
+
+		lastTick = HAL_GetTick();
 	}
 
 	return distance;
@@ -251,16 +319,19 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	if(HAL_GetTick() - ToF_delay_time > 100)
+	/*if(HAL_GetTick() - ToF_delay_time >= 25)
 	{
+		tof_distance_mm = tof_data_request_nonblocking_mode();
 		ToF_delay_time = HAL_GetTick();
-		tof_distance_mm = tof_data_request();
-	}
+	}*/
 
-	static uint8_t comparision_mode = 1;
+
+
+	//tof_distance_mm = tof_data_request_nonblocking_mode();
+	distance_to_display = (float)(tof_distance_mm*10);
+	//GPIO_PinState RainPin = HAL_GPIO_ReadPin(GPIOB, RAINDROP_Pin);
 
     if(angle_conversion_flag){
-
     	string_to_angle = atof((char*)ASCOM_Data);
 
     	memset(ASCOM_Data, 0, ASCOM_Buffer);
@@ -273,7 +344,110 @@ int main(void)
 	angle_to_display = encoder_angle_get(counter);
 	preset_to_display = encoder_ASCOM_preset(string_to_angle);
 
-	if(page_switch) {
+	if(page_manual){
+
+		if(HAL_GetTick() - wave_delay_time_0 > 20) {
+			wave_delay_time_0 = HAL_GetTick();
+
+			Nextion_SendString("x2", angle_to_display);
+		}
+
+		if(HAL_GetTick() - preset_delay_time > 40) {
+			preset_delay_time = HAL_GetTick();
+
+			Nextion_SendString("x3", distance_to_display);
+		}
+
+		if(open){
+			soft_stop = 1;
+
+			if(soft_start) {
+				ride_open();
+				pwm_run_1 = 1;
+				pwm_run_2 = 0;
+				soft_stop = 0;
+				open = 0;
+			}
+		}
+
+		if(close){
+			soft_stop = 1;
+
+			if(soft_start){
+				ride_close();
+				pwm_run_1 = 1;
+				pwm_run_2 = 0;
+				soft_stop = 0;
+				close = 0;
+			}
+		}
+
+		if(left){
+			soft_stop = 1;
+
+			if(soft_start) {
+				ride_left();
+				pwm_run_2 = 1;
+				pwm_run_1 = 0;
+				soft_stop = 0;
+				left = 0;
+			}
+		}
+
+		if(right){
+			soft_stop = 1;
+
+			if(soft_start) {
+				ride_right();
+				pwm_run_2 = 1;
+				pwm_run_1 = 0;
+				soft_stop = 0;
+				right = 0;
+			}
+		}
+
+		if(soft_start){
+
+			if(pwm_run_1)
+				soft_start_func(&pwm_value_1, 0, &tick_start_1);
+
+			if(pwm_run_2)
+				soft_start_func(&pwm_value_2, 1, &tick_start_1);
+
+			if(pwm_value_1 == 400 || pwm_value_2 == 400)
+				soft_start = 0;
+
+		}
+
+		if(soft_stop){
+
+			soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+
+			if(pwm_value_1 == 0 && pwm_value_2 == 0){
+				soft_stop = 0;
+				pwm_run_1 = 0;
+				pwm_run_2 = 0;
+				soft_start = 1;
+				dont_ride();
+			}
+		}
+
+	}else {
+
+	    if(pwm_value_1 > 0 || pwm_value_2 > 0) {
+	        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+	    }
+	    else {
+	        dont_ride();
+	        soft_stop = 0;
+
+	        // Warunek przy ponownym wejściu do manual
+	        soft_start = 1;
+	    }
+	}
+
+
+	if(page_auto) {
 		if(HAL_GetTick() - wave_delay_time_0 > 20) {
 
 			wave_delay_time_0 = HAL_GetTick();
@@ -288,13 +462,34 @@ int main(void)
 			Nextion_SendString("x1", preset_to_display);
 		}
 
+		static uint8_t start_automation = 0;
+		static uint8_t comparision_mode = 1;
+		static uint32_t auto_delay_tick = 0;
+
 		if(angle_to_display == preset_to_display) {
-			pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
+
+		    if(pwm_value_1 > 0 || pwm_value_2 > 0) {
+		        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+		    }else {
+		    	dont_ride();
+		    }
+			//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
+		    soft_start = 0;
 			ride_left_flag = 0;	// Zerowanie flag jazdy silnikiem w lewo
 			ride_right_flag = 0; // Zerowanie flag jazdy silnikiem w prawo
+			start_automation = 0;
 			comparision_mode = 1;
+			auto_delay_tick = HAL_GetTick();
 		}
 		else {
+
+		if(HAL_GetTick() - auto_delay_tick > 500){
+			start_automation = 1;
+
+			auto_delay_tick = HAL_GetTick();
+		}
+
+		if(start_automation) {
 			float delta = preset_to_display - angle_to_display;
 
 			if(comparision_mode) {
@@ -316,14 +511,44 @@ int main(void)
 
 			}
 
-			if(ride_left_flag)
-				ride_left();
+			if(ride_left_flag) {
 
-			if(ride_right_flag)
-				ride_right();
+				if(pwm_value_1 > 0)
+			        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+				else {
+					ride_left();
+					soft_start = 1;
+				}
+			}
 
-			pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
+			if(ride_right_flag) {
+
+				if(pwm_value_1 > 0)
+			        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+				else {
+					ride_right();
+					soft_start = 1;
+				}
+			}
+
+			if(soft_start){
+				soft_start_func(&pwm_value_1, 0, &tick_start_1);
+			}
+
 		}
+
+		}
+	} else {
+	    if(pwm_value_1 > 0 || pwm_value_2 > 0) {
+	        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+	    }
+	    else {
+	        dont_ride();
+	        soft_stop = 0;
+
+	        // Warunek przy ponownym wejściu do manual
+	        soft_start = 1;
+	    }
 	}
 
 	//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
@@ -413,14 +638,28 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart->Instance == USART1) {
 
-		if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x02)
-			page_switch = 1;
-		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x04)
-			page_switch = 0;
-		else if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x06)
+		if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x04)
+			page_manual = 1;
+		else if(Rx_Data[1] == 0x00 && Rx_Data[2] == 0x03)
+			page_auto = 1;
+		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x0E)
+			page_manual = 0;
+		else if(Rx_Data[1] == 0x03 && Rx_Data[2] == 0x04)
+			page_auto = 0;
+		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x0D)
+			waveform_enable = 1;
+		else if(Rx_Data[1] == 0x03 && Rx_Data[2] == 0x08)
 			waveform_enable = 1;
 		else if(Rx_Data[1] == 0x02 && Rx_Data[2] == 0x03)
 			waveform_enable = 0;
+		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x03)
+			open = 1;
+		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x04)
+			close = 1;
+		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x05)
+			left = 1;
+		else if(Rx_Data[1] == 0x01 && Rx_Data[2] == 0x06)
+			right = 1;
 
 		HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
 	}
