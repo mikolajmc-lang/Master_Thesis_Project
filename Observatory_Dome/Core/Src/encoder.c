@@ -117,11 +117,11 @@ void dont_ride()
 	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
 }
 
-void soft_start_func(uint16_t *pwm, uint8_t channel, uint32_t *tick)
+void soft_start_func(uint8_t *pwm, uint8_t channel, uint32_t *tick)
 {
-	if(HAL_GetTick() - *tick > 8){
+	if(HAL_GetTick() - *tick > 50){
 
-		if(*pwm < 400) {
+		if(*pwm < 60) {
 			(*pwm)++;
 
 			if(channel == 0)
@@ -134,9 +134,9 @@ void soft_start_func(uint16_t *pwm, uint8_t channel, uint32_t *tick)
 }
 
 
-void soft_stop_func(uint16_t *pwm, uint16_t *pwm2, uint32_t *tick)
+void soft_stop_func(uint8_t *pwm, uint8_t *pwm2, uint32_t *tick)
 {
-	if(HAL_GetTick() - *tick > 8){
+	if(HAL_GetTick() - *tick > 50){
 
 		if(*pwm > 0){
 		--(*pwm);
