@@ -79,6 +79,7 @@ void Error_Handler(void);
 #define TCK_GPIO_Port GPIOA
 #define RAINDROP_Pin GPIO_PIN_4
 #define RAINDROP_GPIO_Port GPIOB
+#define RAINDROP_EXTI_IRQn EXTI4_IRQn
 #define XSHUT_Pin GPIO_PIN_5
 #define XSHUT_GPIO_Port GPIOB
 #define ENGINE1P_Pin GPIO_PIN_6
