@@ -86,10 +86,6 @@ uint8_t soft_stop = 0;
 uint8_t amp_waveform = 0;
 uint8_t amp_waveform_1 = 0;
 
-
-volatile uint8_t ToF_Data[2];
-volatile uint16_t ToF_Measurement = 0;
-
 uint8_t Rx_Data[4];
 uint8_t ASCOM_Data[ASCOM_Buffer];
 uint8_t ASCOM_Index = 0;
@@ -101,12 +97,10 @@ volatile uint8_t close = 0;
 volatile uint8_t left = 0;
 volatile uint8_t right = 0;
 
-volatile uint8_t raindrop_engine = 0;
 volatile uint8_t raindrop_signal = 0;
 volatile uint8_t waveform_enable = 0;
 volatile uint8_t page_auto = 0;
 volatile uint8_t page_manual = 0;
-volatile uint32_t last_interrupt_time = 0;
 
 uint32_t tick_start_1 = 0, tick_stop_1 = 0;
 uint32_t ToF_Tick = 0;
@@ -118,8 +112,8 @@ uint16_t counter = 0;
 
 uint16_t pwm_signal_1 = 0;
 uint16_t pwm_signal_2 = 0;
-uint8_t pwm_value_1 = 0;
-uint8_t pwm_value_2 = 0;
+volatile uint8_t pwm_value_1 = 0;
+volatile uint8_t pwm_value_2 = 0;
 
 uint16_t current_engine_value[2];
 
@@ -152,8 +146,9 @@ void Nextion_SendString(char *ID, float info);
 void Nextion_SendString_Rain(char *text_ID, char *info);
 void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
 void Nextion_SendString_Current(int16_t current1, int16_t current2);
-void soft_start_func(uint8_t *pwm, uint8_t channel, uint32_t *tick);
-void soft_stop_func(uint8_t *pwm, uint8_t *pwm2, uint32_t *tick);
+void soft_start_func(volatile uint8_t *pwm, uint8_t channel, uint32_t *tick);
+void soft_stop_func(volatile uint8_t *pwm, volatile uint8_t *pwm2, uint32_t *tick);
+void soft_stop_func_alternate(volatile uint8_t *pwm, uint8_t channel, uint32_t *tick);
 void ride_left(void);
 void ride_right(void);
 void ride_open(void);
@@ -346,6 +341,7 @@ int main(void)
 	//tof_distance_mm = tof_data_request_nonblocking_mode();
 	distance_to_display = (float)(tof_distance_mm*10);
 
+	static uint8_t reset_pwm = 0;
 	static uint8_t rain_string = 0;
 	static uint8_t timer_reset = 0;
 
@@ -363,6 +359,9 @@ int main(void)
 	preset_to_display = encoder_ASCOM_preset(string_to_angle);
 
 	if(page_manual && !page_auto){
+
+		static uint8_t dont_ride_flag = 0;
+		reset_pwm = 0;
 
 		if(!timer_reset)
 		{
@@ -478,18 +477,36 @@ int main(void)
 			if(pwm_run_2)
 				soft_start_func(&pwm_value_2, 1, &tick_start_1);
 
-			if(pwm_value_1 == 60 || pwm_value_2 == 60)
+			if(pwm_value_1 >= 65 || pwm_value_2 >= 65) // Silnik musi się rozpedzić
 				soft_start = 0;
 
 		}
 
 		if(soft_stop){
 
-			soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+			if(!dont_ride_flag) {
+				dont_ride();
+				dont_ride_flag = 1;
+			}
+
+			//soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+			if(pwm_run_1)
+				soft_stop_func_alternate(&pwm_value_1, 0, &tick_stop_1);
+
+			if(pwm_run_2)
+				soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
+
 
 			if(pwm_value_1 == 0 && pwm_value_2 == 0){
 				soft_stop = 0;
-				dont_ride();
+				dont_ride_flag = 0;
+
+				if(pwm_run_1)
+					__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
+
+				if(pwm_run_2)
+					__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
+				//dont_ride();
 
 				if(open) {
 					ride_open();
@@ -523,30 +540,13 @@ int main(void)
 					CurrentDir = DIR_NONE;
 					pwm_run_1 = 0;
 					pwm_run_2 = 0;
+					soft_start = 0;
 				}
 
 			}
 		}
 
-	}else if(!page_auto && !page_manual){
-
-		timer_reset = 0;
-
-	    if(pwm_value_1 > 0 || pwm_value_2 > 0) {
-	        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
-	    }
-	    else {
-	        dont_ride();
-	        soft_stop = 0;
-
-	        // Warunek przy ponownym wejściu do manual
-	        soft_start = 0;
-	    }
-	}
-
-
-	if(page_auto && !page_manual) {
-
+	} else if(!page_manual && page_auto){
 		if(!timer_reset)
 		{
 			preset_delay_time = HAL_GetTick();
@@ -556,7 +556,7 @@ int main(void)
 			timer_reset = 1;
 		}
 
-		if(!rain_string) {
+		/*if(!rain_string) {
 			Nextion_SendString_Rain("OFF", "RED");
 			rain_string = 1;
 		}
@@ -586,7 +586,7 @@ int main(void)
 			wave_delay_time_0 = HAL_GetTick();
 			ToF_Tick = HAL_GetTick();
 			nextion_rain_on = 0;
-		}
+		}*/
 
 		if(HAL_GetTick() - preset_delay_time > 19) {
 			preset_delay_time = HAL_GetTick();
@@ -686,13 +686,14 @@ int main(void)
 				if(soft_start){
 					soft_start_func(&pwm_value_2, 1, &tick_start_1);
 
-					if(pwm_value_2 == 60)
+					if(pwm_value_2 == 65)
 						soft_start = 0;
 				}
 
 			}
 		}
-	} else if(!page_auto && !page_manual){
+	} else if(!page_manual && !page_auto){
+
 		timer_reset = 0;
 		rain_string = 0;
 
@@ -702,12 +703,26 @@ int main(void)
 	    else {
 	        dont_ride();
 	        soft_stop = 0;
-
 	        // Warunek przy ponownym wejściu do manual
 	        soft_start = 0;
+			pwm_run_1 = 0;
+			pwm_run_2 = 0;
+			CurrentDir = DIR_NONE;
+			open = 0;
+			close = 0;
+			left = 0;
+			right = 0;
+
+			if(!reset_pwm) {
+			HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+			HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
+			MX_TIM2_Init();
+			HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+			HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
+			reset_pwm = 1;
+			}
 	    }
 	}
-
 	//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
 	//pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
 
@@ -834,33 +849,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 }
 
-void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
+/*void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	if(hi2c ->Instance == I2C1)
-	{
-		ToF_Measurement = ToF_Data[0] << 8 | ToF_Data[1];
-	}
-}
+	static uint32_t last_interrupt_time = 0;
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
+	uint32_t current_time = HAL_GetTick();
+
 	if(GPIO_Pin == RAINDROP_Pin) {
 
-		raindrop_signal = 1;
+		if(current_time - last_interrupt_time > 200) {
 
-		if(HAL_GPIO_ReadPin(RAINDROP_GPIO_Port, RAINDROP_Pin) == GPIO_PIN_RESET) {
+			raindrop_signal = 1;
 
-			if (raindrop_engine == 0) {
-			raindrop_engine = 1;//volatile
-			}
-
-		} else {
-			if (raindrop_engine == 1) {
-			raindrop_engine = 0; //volatile
-			}
+			last_interrupt_time = current_time;
 		}
 	}
-}
+}*/
 /* USER CODE END 4 */
 
 /**

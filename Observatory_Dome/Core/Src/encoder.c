@@ -117,38 +117,72 @@ void dont_ride()
 	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
 }
 
-void soft_start_func(uint8_t *pwm, uint8_t channel, uint32_t *tick)
+void soft_start_func(volatile uint8_t *pwm, uint8_t channel, uint32_t *tick)
 {
-	if(HAL_GetTick() - *tick > 50){
+	if(HAL_GetTick() - *tick > 20){
 
-		if(*pwm < 60) {
-			(*pwm)++;
+		if(*pwm >= 0 && *pwm < 65) {
+
+			if(*pwm < 42){
+				*pwm = 42;
+			} else {
+				(*pwm)++;
+			}
 
 			if(channel == 0)
 				__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, *pwm);
 			else
 				__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, *pwm);
 		}
+
 		*tick = HAL_GetTick();
 	}
 }
 
 
-void soft_stop_func(uint8_t *pwm, uint8_t *pwm2, uint32_t *tick)
+void soft_stop_func(volatile uint8_t *pwm, volatile uint8_t *pwm2, uint32_t *tick)
 {
-	if(HAL_GetTick() - *tick > 50){
+	if(HAL_GetTick() - *tick > 20){
 
 		if(*pwm > 0){
-		--(*pwm);
+			//if(*pwm <= 42) {
+			//	*pwm = 0; // Skok od razu do 0
+			//}else{
+				--(*pwm);
+			//}
 		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, *pwm);
 		}
 
 		if(*pwm2 > 0){
-		--(*pwm2);
+			//if(*pwm2 <= 42) {
+			//*pwm2 = 0;
+			//} else {
+			--(*pwm2);
+			//}
 		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, *pwm2);
 		}
 
 		*tick = HAL_GetTick();
 	}
+}
+
+void soft_stop_func_alternate(volatile uint8_t *pwm, uint8_t channel, uint32_t *tick)
+{
+	if(HAL_GetTick() - *tick > 20){
+
+		if(*pwm > 0){
+			--(*pwm);
+
+		if(channel == 0)
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, *pwm);
+		else
+			__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, *pwm);
+
+		}
+
+		*tick = HAL_GetTick();
+	}
+
+
 }
 
