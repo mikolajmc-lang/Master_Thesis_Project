@@ -74,8 +74,10 @@ uint8_t i2c_transmit_flag = 0;
 uint8_t angle_conversion_flag = 0;
 uint8_t ride_left_flag = 0;
 uint8_t ride_right_flag = 0;
-uint8_t nextion_rain_on = 0;
-uint8_t nextion_rain_off = 0;
+uint8_t ride_open_flag = 0;
+uint8_t ride_close_flag = 0;
+volatile uint8_t nextion_rain_on = 0;
+volatile uint8_t nextion_rain_off = 0;
 
 uint8_t pwm_run_1 = 0;
 uint8_t pwm_run_2 = 0;
@@ -384,13 +386,13 @@ int main(void)
 
 		if(open){
 			if(CurrentDir== DIR_OPEN) {
-			        // DRUGIE KLIKNI�?CIE: Silnik jedzie w tym samym kierunku, więc go zatrzymujemy
+			        // DRUGIE KLIKNIECIE: Silnik jedzie w tym samym kierunku, więc go zatrzymujemy
 			        soft_stop = 1;
 			        soft_start = 0;
 			        CurrentDir = DIR_NONE; // Ważne: zmieniamy stan na NONE, żeby system wiedział, że dążymy do stopu
 			        open = 0;               // "Konsumujemy" flagę
 			} else {
-				// PIERWSZE KLIKNI�?CIE (lub zmiana z innego kierunku):
+				// PIERWSZE KLIKNIECIE (lub zmiana z innego kierunku):
 				if(pwm_value_1 == 0 && pwm_value_2 == 0 && soft_stop == 0){
 					ride_open();
 					CurrentDir = DIR_OPEN;
@@ -556,20 +558,26 @@ int main(void)
 			timer_reset = 1;
 		}
 
-		/*if(!rain_string) {
+		if(!rain_string) {
 			Nextion_SendString_Rain("OFF", "RED");
 			rain_string = 1;
 		}
 
 
-		if(raindrop_signal){
-			raindrop_signal = 0;
-
+		/*if(raindrop_signal){
 			if(HAL_GPIO_ReadPin(RAINDROP_GPIO_Port, RAINDROP_Pin) == GPIO_PIN_RESET) {
 				nextion_rain_on = 1;
 			} else {
 				nextion_rain_off = 1;
 			}
+		}*/
+
+		if(nextion_rain_on) {
+			Nextion_SendString_Rain("ON", "GREEN");
+			preset_delay_time = HAL_GetTick();
+			wave_delay_time_0 = HAL_GetTick();
+			ToF_Tick = HAL_GetTick();
+			nextion_rain_on = 0;
 		}
 
 		if(nextion_rain_off) {
@@ -579,14 +587,6 @@ int main(void)
 			ToF_Tick = HAL_GetTick();
 			nextion_rain_off = 0;
 		}
-
-		if(nextion_rain_on) {
-			Nextion_SendString_Rain("ON", "GREEN");
-			preset_delay_time = HAL_GetTick();
-			wave_delay_time_0 = HAL_GetTick();
-			ToF_Tick = HAL_GetTick();
-			nextion_rain_on = 0;
-		}*/
 
 		if(HAL_GetTick() - preset_delay_time > 19) {
 			preset_delay_time = HAL_GetTick();
@@ -610,33 +610,135 @@ int main(void)
 
 
 		static uint8_t start_automation = 0;
+		static uint8_t automation_active = 0;
+		static uint8_t brake_1_or_2 = 0;
 		static uint8_t comparision_mode = 1;
+		static uint8_t nextion_off = 0;
 		static uint32_t auto_delay_tick = 0;
 
-		if(angle_to_display == preset_to_display) {
+		if((angle_to_display == preset_to_display)) { // DO SKONCZENIA!!!!!!!!
 
-		    if(pwm_value_1 > 0 || pwm_value_2 > 0) {
-		        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
-		    }else {
-		    	dont_ride();
+		    if(!raindrop_signal) {
+				if(pwm_value_1 > 0 || pwm_value_2 > 0) {
+					soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+				}else {
+					dont_ride();
+					__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
+					__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
+				}
+				if(!nextion_off){
+					nextion_rain_off = 1;
+					nextion_off = 1;
+				}
+
+				soft_start = 0;
+				ride_left_flag = 0;	// Zerowanie flag jazdy silnikiem w lewo
+				ride_right_flag = 0; // Zerowanie flag jazdy silnikiem w prawo
+				ride_open_flag = 0;
+				ride_close_flag = 0;
+				start_automation = 0;
+				comparision_mode = 1;
+				auto_delay_tick = HAL_GetTick();
+		    } else {
+		    	// Zmiana flag
+		    	nextion_off = 0;
+		    	ride_open_flag = 0;
+		    	ride_close_flag = 1;
+
+		    	// Ustawienie toru jazdy
+				if(ride_open_flag) {
+
+
+						if(!soft_start){
+							ride_open();
+							soft_start = 1;
+						}
+				}
+
+				if(ride_close_flag) {
+
+
+						if(!soft_start){
+							ride_close();
+							soft_start = 1;
+						}
+				}
+
+				// Rozpędzanie
+				if(soft_start){
+					soft_start_func(&pwm_value_1, 0, &tick_start_1);
+
+					if(pwm_value_1 == 65)
+						soft_start = 0;
+				}
+
+				// Zamkniecie = reset czujnika
+				if(tof_distance_mm <= 50)
+					raindrop_signal = 0;
 		    }
-			//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
-		    soft_start = 0;
-			ride_left_flag = 0;	// Zerowanie flag jazdy silnikiem w lewo
-			ride_right_flag = 0; // Zerowanie flag jazdy silnikiem w prawo
-			start_automation = 0;
-			comparision_mode = 1;
-			auto_delay_tick = HAL_GetTick();
+
 		}
 		else {
 
 			if(HAL_GetTick() - auto_delay_tick > 2000){
 				start_automation = 1;
-
+				automation_active = 1;
 				auto_delay_tick = HAL_GetTick();
 			}
 
-			if(start_automation) {
+			if(raindrop_signal) {
+
+				if(!ride_close_flag)
+					soft_start = 0;
+
+				comparision_mode = 1;
+				ride_left_flag = 0;
+				ride_right_flag = 0;
+
+				if(!brake_1_or_2){
+					if(pwm_value_2 > 0) {
+						soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
+					}else {
+						dont_ride();
+						__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
+						__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
+						ride_close_flag = 1;
+					}
+				} else {
+					ride_close_flag = 0;
+
+					if(pwm_value_1 > 0) {
+						soft_stop_func_alternate(&pwm_value_1, 0, &tick_stop_1);
+					}else {
+						dont_ride();
+						__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
+						__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
+						raindrop_signal = 0; // Ważne!
+						brake_1_or_2 = 0;
+					}
+				}
+
+				if(ride_close_flag) {
+
+						if(!soft_start){
+							ride_close();
+							soft_start = 1;
+						}
+				}
+
+				if(soft_start) {
+					soft_start_func(&pwm_value_1, 0, &tick_start_1);
+
+					if(pwm_value_1 == 65)
+						soft_start = 0;
+				}
+
+				if(tof_distance_mm <= 50)
+					brake_1_or_2 = 1;
+
+			}
+
+			if(start_automation && !raindrop_signal) {
 				float delta = preset_to_display - angle_to_display;
 
 				if(comparision_mode) {
@@ -691,6 +793,7 @@ int main(void)
 				}
 
 			}
+
 		}
 	} else if(!page_manual && !page_auto){
 
@@ -849,7 +952,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 }
 
-/*void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	static uint32_t last_interrupt_time = 0;
 
@@ -857,14 +960,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 	if(GPIO_Pin == RAINDROP_Pin) {
 
-		if(current_time - last_interrupt_time > 200) {
+		if(current_time - last_interrupt_time > 300) {
 
 			raindrop_signal = 1;
+			nextion_rain_on = 1;
 
 			last_interrupt_time = current_time;
 		}
 	}
-}*/
+}
 /* USER CODE END 4 */
 
 /**
