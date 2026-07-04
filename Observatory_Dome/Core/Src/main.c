@@ -380,25 +380,28 @@ int main(void)
 	if(page_manual && !page_auto){
 
 		static uint8_t dont_ride_flag = 0;
+		static uint8_t string_queue = 0;
+
 		reset_pwm = 0;
 
-		if(!timer_reset)
-		{
-			wave_delay_time_0 = HAL_GetTick();
-			wave_delay_time_1 = HAL_GetTick();
-			timer_reset = 1;
-		}
 
-		if(HAL_GetTick() - wave_delay_time_0 > 20) {
-			wave_delay_time_0 = HAL_GetTick();
+		if(huart1.gState == HAL_UART_STATE_READY) {
 
-			Nextion_SendString("x3", angle_to_display);
-		}
+			if(HAL_GetTick() - wave_delay_time_0 > 15) {
+				wave_delay_time_0 = HAL_GetTick();
 
-		if(HAL_GetTick() - preset_delay_time > 40) {
-			preset_delay_time = HAL_GetTick();
+				switch(string_queue) {
+					case 0:
+						Nextion_SendString("x3", angle_to_display);
+						string_queue++;
+					break;
 
-			Nextion_SendString("x4", distance_to_display);
+					case 1:
+						Nextion_SendString("x4", distance_to_display);
+						string_queue = 0;
+					break;
+				}
+			}
 		}
 
 		if(open){
