@@ -55,7 +55,7 @@ typedef enum {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define ASCOM_Buffer 10
+#define ASCOM_Buffer 20
 
 #define RAIN_STATE_NONE          0
 #define RAIN_STATE_GO_HOME       1
@@ -77,6 +77,7 @@ typedef enum {
 
 // user test values
 
+uint8_t label_is_home = 0; // 0 - Preset, 1 - Angle.
 uint8_t i,j,k,l = 0; // Zabezpieczenie ponownego załączenia obrotów
 uint8_t i2c_transmit_flag = 0;
 uint8_t angle_conversion_flag = 0;
@@ -86,6 +87,7 @@ uint8_t ride_open_flag = 0;
 uint8_t ride_close_flag = 0;
 volatile uint8_t nextion_rain_on = 0;
 volatile uint8_t nextion_rain_off = 0;
+volatile uint8_t is_home = 0;
 
 uint8_t pwm_run_1 = 0;
 uint8_t pwm_run_2 = 0;
@@ -152,6 +154,7 @@ float get_current_offset(uint16_t dma_adc_index, float offset);
 float get_amps(float filter_value);
 float encoder_ASCOM_preset(float angle_position);
 void encoder_display_angle(uint16_t position);
+void Nextion_SendText(char *ID, char *string);
 void Nextion_SendString(char *ID, float info);
 void Nextion_SendString_Rain(char *text_ID, char *info);
 void Nextion_Waveform(uint8_t wave1, uint8_t wave2);
@@ -364,18 +367,32 @@ int main(void)
 	static uint8_t rain_state = RAIN_STATE_NONE;
 
     if(angle_conversion_flag){
-    	string_to_angle = atof((char*)ASCOM_Data);
 
-    	memset(ASCOM_Data, 0, ASCOM_Buffer);
+    	char local_ASCOM_buffer[20];
+
+    	__disable_irq();
+
+    	// Kopiowanie stringa do lokalnego bufora
+    	strcpy(local_ASCOM_buffer, (char*)ASCOM_Data);
+
+    	// Reset globalnego bufora i flag
+    	memset(ASCOM_Data, 0, sizeof(ASCOM_Data));
     	ASCOM_Index = 0;
     	angle_conversion_flag = 0;
+
+    	__enable_irq();
+
+    	// Konwersja danych string do float
+    	string_to_angle = atof(local_ASCOM_buffer);
+
+    	// Wysłanie na parametr wyświetlacza
+    	preset_to_display = encoder_ASCOM_preset(string_to_angle);
     }
 
 
 
 	counter = encoder_cnt_get();
 	angle_to_display = encoder_angle_get(counter);
-	preset_to_display = encoder_ASCOM_preset(string_to_angle);
 
 	if(page_manual && !page_auto){
 
@@ -573,6 +590,7 @@ int main(void)
 		// --- 1. SEKCJA NEXTIONA ---
 		        static uint32_t nextion_update_tick = 0;
 		        static uint8_t nextion_seq = 0;
+		        float angle_Home = 0.0;
 
 		        // GŁÓWNY WARUNEK: Czy sprzętowe DMA skończyło wysyłać poprzednie dane?
 		        if (huart1.gState == HAL_UART_STATE_READY) {
@@ -589,8 +607,15 @@ int main(void)
 		            else if (nextion_rain_off) {
 		                Nextion_SendString_Rain("OFF", "RED");
 		                nextion_rain_off = 0;
+		            } // Zmiana napisu na "Angle:" podczas powrotu do bazy i zamykania klapy
+		            else if (rain_state >= RAIN_STATE_GO_HOME && rain_state <= RAIN_STATE_STOP_SHUTTER && !label_is_home) {
+		                Nextion_SendText("t1", "Home:");
+		                label_is_home = 1;
+		            }// Powrót do napisu "Preset:" po zakończeniu zamykania lub w stanie spoczynku
+		            else if ((rain_state == RAIN_STATE_NONE || rain_state == RAIN_STATE_RESUME_DRIVE || rain_state == RAIN_STATE_FINISHED) && label_is_home) {
+		                Nextion_SendText("t1", "Preset:");
+		                label_is_home = 0;
 		            }
-
 		            // PRIORYTET 2: Standardowa, cykliczna wysyłka parametrów (co 15ms)
 		            // Wejdzie tu tylko wtedy, gdy nie ma żadnych pilnych alertów do wysłania
 		            else if (HAL_GetTick() - nextion_update_tick > 15) {
@@ -602,7 +627,11 @@ int main(void)
 		                        nextion_seq++;
 		                        break;
 		                    case 1:
-		                        Nextion_SendString("x1", preset_to_display);
+		                    	if(label_is_home) {
+			                        Nextion_SendString("x1", angle_Home);
+		                    	} else {
+			                        Nextion_SendString("x1", preset_to_display);
+		                    	}
 		                        nextion_seq++;
 		                        break;
 		                    case 2:
@@ -613,7 +642,6 @@ int main(void)
 		            }
 		        }
 
-		        float angle_Home = 0.0;
 		        float target_angle = preset_to_display; // Domyślnie podążamy do presetu
 
 		        if(HAL_GetTick() - auto_delay_tick > 2000){
@@ -774,7 +802,7 @@ int main(void)
 		// --- 1. RESET PODSTAWOWY ---
 		        timer_reset = 0;
 		        rain_string = 0;
-
+		        label_is_home = 0;
 		        // --- 2. RESET MASZYNY STANÓW AUTO ---
 		        start_automation = 0;
 		        automation_active = 0;
@@ -838,16 +866,27 @@ int main(void)
 
 	if(waveform_enable) {
 
+		static uint8_t waveform_queue = 0;
+
 		rain_string = 0;
 
-		if(HAL_GetTick() - wave_delay_time_0 > 15) {
-			wave_delay_time_0 = HAL_GetTick();
-			Nextion_Waveform(amp_waveform, amp_waveform_1);
-		}
+		if(huart1.gState == HAL_UART_STATE_READY) {
+			if(HAL_GetTick() - wave_delay_time_0 > 15) {
+				wave_delay_time_0 = HAL_GetTick();
 
-		if(HAL_GetTick() - wave_delay_time_1 > 25) {
-			wave_delay_time_1 = HAL_GetTick();
-			Nextion_SendString_Current(amps_to_display_0, amps_to_display_1);
+				switch(waveform_queue) {
+					case 0:
+						Nextion_Waveform(amp_waveform, amp_waveform_1);
+						waveform_queue++;
+					break;
+
+					case 1:
+						Nextion_SendString_Current(amps_to_display_0, amps_to_display_1);
+						waveform_queue = 0;
+					break;
+				}
+
+			}
 		}
 	}
 
@@ -933,16 +972,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 
 	if(huart->Instance == USART2) {
+			if(ASCOM_Byte == '\n') {
+				// Znak końca - parsujemy!
+				ASCOM_Data[ASCOM_Index] = '\0'; // ZAWSZE zamykaj string znakiem NULL przed użyciem atof!
+				angle_conversion_flag = 1;
+			}
+	        else if (ASCOM_Byte != '\r') {
+				// Zabezpieczenie przed przepełnieniem bufora
+				if (ASCOM_Index < (ASCOM_Buffer - 1)) {
+					ASCOM_Data[ASCOM_Index++] = ASCOM_Byte;
+				}
+	            // Jeśli przyszło więcej znaków niż rozmiar bufora, po prostu je ignorujemy
+	            // aż do momentu nadejścia '\n'
+			}
 
-	  //UART_value = (uint16_t)(Rx_Test_Data[0] << 8 | Rx_Test_Data[1]);
-		if(ASCOM_Byte == '\n'){
-			angle_conversion_flag = 1;
-		} else {
-			ASCOM_Data[ASCOM_Index++] = ASCOM_Byte;
+			HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
 		}
-
-		HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
-	}
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
@@ -960,6 +1005,18 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 			last_interrupt_time = current_time;
 		}
+	}
+
+	if(GPIO_Pin == HOME_Position_Pin) {
+
+		static uint32_t last_tick = 0;
+		uint32_t current_tick = HAL_GetTick();
+
+		if(current_tick - last_tick > 150) {
+			is_home = 1;
+		}
+
+		last_tick = current_tick;
 	}
 }
 /* USER CODE END 4 */

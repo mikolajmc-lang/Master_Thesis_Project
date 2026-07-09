@@ -27,6 +27,17 @@ void Nextion_SendString(char *ID, float info)
 	}
 }
 
+void Nextion_SendText(char *ID, char *string)
+{
+	static char buf[50];
+
+	if(huart1.gState == HAL_UART_STATE_READY) {
+		int len = sprintf(buf, "%s.txt=\"%s\"\xFF\xFF\xFF", ID, string);
+
+		HAL_UART_Transmit_DMA(&huart1, (uint8_t*)buf, len);
+	}
+}
+
 void Nextion_SendString_Current(int16_t current1, int16_t current2)
 {
 	static char buf[50];
