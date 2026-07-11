@@ -51,6 +51,12 @@ typedef enum {
 	DIR_LEFT,
 	DIR_RIGHT
 } MotorState;
+
+typedef union {
+	float float_val;
+	uint32_t uint32_t_val;
+	uint8_t bytes[4];
+} ByteConverter;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -85,6 +91,7 @@ uint8_t ride_left_flag = 0;
 uint8_t ride_right_flag = 0;
 uint8_t ride_open_flag = 0;
 uint8_t ride_close_flag = 0;
+volatile uint8_t abort_slew_flag = 0;
 volatile uint8_t nextion_rain_on = 0;
 volatile uint8_t nextion_rain_off = 0;
 volatile uint8_t is_home = 0;
@@ -97,6 +104,17 @@ uint8_t soft_stop = 0;
 
 uint8_t amp_waveform = 0;
 uint8_t amp_waveform_1 = 0;
+
+// Sekcja komunikacji dwustronnej ASCOM - PC
+
+uint8_t ASCOM_rx_buffer[7]; // Bufor na rozkaz z PC (7 bajtów)
+uint8_t ASCOM_tx_buffer[11]; // Bufor na odpowiedź ze statusem (11 bajtów)
+
+uint8_t current_shutter_state = 1; // // 0=Open, 1=Closed, 2=Opening, 3=Closing, 4=Error
+uint8_t is_slewing = 0;           // Flaga ruchu obrotowego kopuły
+uint8_t rain_alert = 0;           // Flaga alarmu pogodowego
+
+volatile uint8_t ASCOM_frame_ready = 0;
 
 uint8_t Rx_Data[4];
 uint8_t ASCOM_Data[ASCOM_Buffer];
@@ -129,6 +147,7 @@ volatile uint8_t pwm_value_2 = 0;
 
 uint16_t current_engine_value[2];
 
+float target_angle = 0.0f;
 float string_to_angle = 0;
 float filtered_value_0 = 2160;
 float filtered_value_1 = 2160;
@@ -143,6 +162,9 @@ int16_t amps_to_display_0 = 0;
 int16_t amps_to_display_1 = 0;
 
 uint16_t tof_distance_mm = 0;
+
+uint8_t comparision_mode = 1;
+volatile uint8_t print_home = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -276,6 +298,126 @@ uint16_t tof_data_request_nonblocking_mode(void)
 	return distance;
 }
 
+void ASCOM_SendStatus(void)
+{
+	ByteConverter az_conv;
+	uint8_t motor_flags = 0;
+
+	// Zabezpieczenie danych
+	az_conv.float_val = (float)(angle_to_display/10.0);
+
+	// Maska bitowa statusu motor_flags
+	if(is_slewing)
+		motor_flags |= 0x01; // Bit 0 (kopula obraca sie)
+	if(rain_alert)
+		motor_flags |= 0x02; // Bit 1 (Deszcz trwa)
+	if(angle_to_display == 0.0f)
+		motor_flags |= 0x04; // Kopuła jest w pozycji Home
+
+	// Konstrukcja stałej długości ramki danych
+	ASCOM_tx_buffer[0] = 0x23; // Znak początku #
+
+	// Rzutowanie danych Azimuth
+	ASCOM_tx_buffer[1] = az_conv.bytes[0];
+	ASCOM_tx_buffer[2] = az_conv.bytes[1];
+	ASCOM_tx_buffer[3] = az_conv.bytes[2];
+	ASCOM_tx_buffer[4] = az_conv.bytes[3];
+
+	ASCOM_tx_buffer[5] = current_shutter_state;
+
+	// Pakowanie dystansu ToF (16-bitowa)
+
+	ASCOM_tx_buffer[6] = (uint8_t)(tof_distance_mm & 0xFF); // LSB
+	ASCOM_tx_buffer[7] = (uint8_t)(tof_distance_mm >> 8 & 0xFF); // MSB
+	ASCOM_tx_buffer[8] = 0x00;
+	ASCOM_tx_buffer[9] = 0x00;
+
+	ASCOM_tx_buffer[10] = motor_flags; // Bajt flag kontrolnych otwierania/zamykania klapy
+
+	uint32_t tx_timeout = HAL_GetTick();
+
+	while(huart2.gState == HAL_UART_STATE_BUSY_TX)
+	{
+		if(HAL_GetTick() - tx_timeout > 3) {
+			return;
+		}
+	}
+
+	HAL_UART_Transmit_DMA(&huart2, ASCOM_tx_buffer, 11);
+}
+
+void ASCOM_ParseCommand(void)
+{
+	// Weryfikacja ramki, sprawdzenie czy przyszlo : oraz $
+	if(ASCOM_rx_buffer[0] == 0x3A && ASCOM_rx_buffer[6] == 0x24)
+	{
+		uint8_t cmd_code = ASCOM_rx_buffer[1];
+		ByteConverter target_az;
+
+		// Bezpośrednie zmapowanie 4 bajtów danych z bufora na wartość float (Azimuth)
+		target_az.bytes[0] = ASCOM_rx_buffer[2];
+		target_az.bytes[1] = ASCOM_rx_buffer[3];
+		target_az.bytes[2] = ASCOM_rx_buffer[4];
+		target_az.bytes[3] = ASCOM_rx_buffer[5];
+
+		// System bezpieczenstwa
+		if (rain_alert && (cmd_code == 1 || cmd_code == 2 || cmd_code == 4)) {
+			ASCOM_SendStatus();
+			return;
+		}
+
+		switch(cmd_code)
+		{
+			case 1: // FIND HOME
+				target_angle = 0.0f;
+				// page_auto = 1;
+				is_slewing = 1;
+				print_home = 1;
+			break;
+
+			case 2: // SLEW
+				if(target_az.float_val >= 0.0f && target_az.float_val < 360.0f) {
+					target_angle = (target_az.float_val*10);
+					// page_auto = 1;
+					is_slewing = 1;
+				}
+			break;
+
+			case 3: // CLOSE SHUTTER
+				if(current_shutter_state != 1 && current_shutter_state != 3)
+				{
+					current_shutter_state = 3;
+					target_angle = 0.0f;
+					// page_auto = 1;
+
+				}
+			break;
+
+			case 4: // OPEN SHUTTER
+				if(current_shutter_state != 0 && current_shutter_state != 2)
+				{
+					current_shutter_state = 2;
+					target_angle = 0.0f;
+					// page_auto = 1;
+				}
+			break;
+
+			case 5: // GET STATUS
+
+			break;
+
+			case 6: // ZATRZYMANIE AWARYJNE (Abort Slew / N.I.N.A. Stop)
+				abort_slew_flag = 1;
+			break;
+
+			default:
+
+			break;
+		}
+
+		ASCOM_SendStatus();
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -330,6 +472,7 @@ int main(void)
 
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
+  //HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
   HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)current_engine_value, 2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -343,6 +486,12 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	/* if(ASCOM_frame_ready) {
+		ASCOM_frame_ready = 0;
+
+		ASCOM_ParseCommand();
+	} */
 
 
 	if(HAL_GetTick() - ToF_delay_time >= 30)
@@ -361,38 +510,44 @@ int main(void)
 	// --- ZMIENNE MASZYNY STANÓW AUTO ---
 	static uint8_t start_automation = 0;
 	static uint8_t automation_active = 0;
-	static uint8_t comparision_mode = 1;
 	static uint8_t nextion_off = 0;
 	static uint32_t auto_delay_tick = 0;
 	static uint8_t rain_state = RAIN_STATE_NONE;
 
-    if(angle_conversion_flag){
-
-    	char local_ASCOM_buffer[20];
-
-    	__disable_irq();
-
-    	// Kopiowanie stringa do lokalnego bufora
-    	strcpy(local_ASCOM_buffer, (char*)ASCOM_Data);
-
-    	// Reset globalnego bufora i flag
-    	memset(ASCOM_Data, 0, sizeof(ASCOM_Data));
-    	ASCOM_Index = 0;
-    	angle_conversion_flag = 0;
-
-    	__enable_irq();
-
-    	// Konwersja danych string do float
-    	string_to_angle = atof(local_ASCOM_buffer);
-
-    	// Wysłanie na parametr wyświetlacza
-    	preset_to_display = encoder_ASCOM_preset(string_to_angle);
-    }
-
-
-
 	counter = encoder_cnt_get();
 	angle_to_display = encoder_angle_get(counter);
+
+	if (abort_slew_flag) {
+	    // 1. Twarde odcięcie sprzętowe
+	    dont_ride();
+	    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42); // PWM jałowe dla szczeliny
+	    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42); // PWM jałowe dla obrotu
+	    pwm_value_1 = 0;
+	    pwm_value_2 = 0;
+
+	    // 2. Czyszczenie flag ruchu
+	    open = 0; close = 0; left = 0; right = 0;
+	    ride_left_flag = 0; ride_right_flag = 0;
+	    ride_open_flag = 0; ride_close_flag = 0;
+
+	    // 3. Resetowanie logiki napędu
+	    CurrentDir = DIR_NONE;
+	    soft_start = 0;
+	    soft_stop = 0;
+	    pwm_run_1 = 0;
+	    pwm_run_2 = 0;
+
+	    // 4. Synchronizacja celu - KLUCZOWE!
+	    // Oszukujemy maszynę stanów, że jesteśmy u celu, żeby nie wznowiła jazdy
+	    target_angle = angle_to_display;
+	    preset_to_display = angle_to_display;
+	    comparision_mode = 1;
+	    is_slewing = 0;
+
+	    // Zatrzymanie awaryjne skonsumowane
+	    abort_slew_flag = 0;
+	}
+
 
 	if(page_manual && !page_auto){
 
@@ -400,7 +555,6 @@ int main(void)
 		static uint8_t string_queue = 0;
 
 		reset_pwm = 0;
-
 
 		if(huart1.gState == HAL_UART_STATE_READY) {
 
@@ -585,265 +739,228 @@ int main(void)
 			}
 		}
 
-	} else if(!page_manual && page_auto){
+	} else if(!page_manual && page_auto)   {
+		// --- 1. SEKCJA NEXTIONA (Round-Robin) ---
+		    static uint32_t nextion_update_tick = 0;
+		    static uint8_t nextion_seq = 0;
+		    float angle_Home = 0.0;
 
-		// --- 1. SEKCJA NEXTIONA ---
-		        static uint32_t nextion_update_tick = 0;
-		        static uint8_t nextion_seq = 0;
-		        float angle_Home = 0.0;
-
-		        // GŁÓWNY WARUNEK: Czy sprzętowe DMA skończyło wysyłać poprzednie dane?
-		        if (huart1.gState == HAL_UART_STATE_READY) {
-
-		            // PRIORYTET 1: Zdarzenia jednorazowe i alerty pogodowe
-		            if (!rain_string && !waveform_enable) {
-		                Nextion_SendString_Rain("OFF", "RED");
-		                rain_string = 1;
-		            }
-		            else if (nextion_rain_on) {
-		                Nextion_SendString_Rain("ON", "GREEN");
-		                nextion_rain_on = 0; // Zerujemy flagę dopiero gdy mamy PEWNOŚĆ, że DMA przyjęło dane
-		            }
-		            else if (nextion_rain_off) {
-		                Nextion_SendString_Rain("OFF", "RED");
-		                nextion_rain_off = 0;
-		            } // Zmiana napisu na "Angle:" podczas powrotu do bazy i zamykania klapy
-		            else if (rain_state >= RAIN_STATE_GO_HOME && rain_state <= RAIN_STATE_STOP_SHUTTER && !label_is_home) {
-		                Nextion_SendText("t1", "Home:");
-		                label_is_home = 1;
-		            }// Powrót do napisu "Preset:" po zakończeniu zamykania lub w stanie spoczynku
-		            else if ((rain_state == RAIN_STATE_NONE || rain_state == RAIN_STATE_RESUME_DRIVE || rain_state == RAIN_STATE_FINISHED) && label_is_home) {
-		                Nextion_SendText("t1", "Preset:");
-		                label_is_home = 0;
-		            }
-		            // PRIORYTET 2: Standardowa, cykliczna wysyłka parametrów (co 15ms)
-		            // Wejdzie tu tylko wtedy, gdy nie ma żadnych pilnych alertów do wysłania
-		            else if (HAL_GetTick() - nextion_update_tick > 15) {
-		                nextion_update_tick = HAL_GetTick();
-
-		                switch(nextion_seq) {
-		                    case 0:
-		                        Nextion_SendString("x0", angle_to_display);
-		                        nextion_seq++;
-		                        break;
-		                    case 1:
-		                    	if(label_is_home) {
-			                        Nextion_SendString("x1", angle_Home);
-		                    	} else {
-			                        Nextion_SendString("x1", preset_to_display);
-		                    	}
-		                        nextion_seq++;
-		                        break;
-		                    case 2:
-		                        Nextion_SendString("x2", distance_to_display);
-		                        nextion_seq = 0; // Wracamy na początek sekwencji
-		                        break;
-		                }
+		    if (huart1.gState == HAL_UART_STATE_READY) {
+		        if (!rain_string && !waveform_enable) {
+		            Nextion_SendString_Rain("OFF", "RED");
+		            rain_string = 1;
+		        }
+		        else if (nextion_rain_on) {
+		            Nextion_SendString_Rain("ON", "GREEN");
+		            nextion_rain_on = 0;
+		        }
+		        else if (nextion_rain_off) {
+		            Nextion_SendString_Rain("OFF", "RED");
+		            nextion_rain_off = 0;
+		        }
+		        else if ((current_shutter_state == 2 || current_shutter_state == 3 || rain_alert || print_home) && !label_is_home) {
+		            Nextion_SendText("t1", "Home:"); // Pokazujemy Home w trakcie powrotu
+		            print_home = 0;
+		            label_is_home = 1;
+		        }
+		        else if (current_shutter_state <= 1 && !rain_alert && label_is_home && !is_slewing) {
+		            Nextion_SendText("t1", "Preset:");
+		            label_is_home = 0;
+		        }
+		        else if (HAL_GetTick() - nextion_update_tick > 15) {
+		            nextion_update_tick = HAL_GetTick();
+		            switch(nextion_seq) {
+		                case 0: Nextion_SendString("x0", angle_to_display); nextion_seq++; break;
+		                case 1:
+		                    if(label_is_home) Nextion_SendString("x1", angle_Home);
+		                    else Nextion_SendString("x1", target_angle);
+		                    nextion_seq++; break;
+		                case 2: Nextion_SendString("x2", distance_to_display); nextion_seq = 0; break;
 		            }
 		        }
+		    }
 
-		        float target_angle = preset_to_display; // Domyślnie podążamy do presetu
+		    // --- 2. DELAY AUTOMATYZACJI ---
+		    if (HAL_GetTick() - auto_delay_tick > 2000) {
+		        start_automation = 1;
+		        automation_active = 1;
+		        auto_delay_tick = HAL_GetTick();
+		    }
 
-		        if(HAL_GetTick() - auto_delay_tick > 2000){
-		            start_automation = 1;
-		            automation_active = 1;
-		            auto_delay_tick = HAL_GetTick();
-		        }
+		    // --- 3. WYKRYCIE DESZCZU (Hardware Override) ---
+		    if (raindrop_signal && !rain_alert) {
+		        rain_alert = 1;
+		        nextion_rain_on = 1;
+		        current_shutter_state = 3; // Wymuś status Closing
+		        target_angle = angle_Home; // Wymuś powrót do 0.0
+		        comparision_mode = 1;
+		    }
+		    else if (!raindrop_signal && rain_alert) {
+		        rain_alert = 0;
+		        nextion_rain_off = 1;
+		    }
 
-		        // --- 3. WYKRYCIE DESZCZU ---
-		        // Gdy pojawia się sygnał, aktywujemy tryb powrotu do Home
-		        if (raindrop_signal && rain_state == RAIN_STATE_NONE) {
-		            rain_state = RAIN_STATE_GO_HOME;
-		            comparision_mode = 1; // Wymusza przeliczenie najkrótszej drogi do Home
-		        }
-
-		        // --- 4. USTALANIE AKTUALNEGO CELU ---
-		        if (rain_state == RAIN_STATE_GO_HOME) {
-		            target_angle = angle_Home;
+		    // --- 4. LOGIKA DOJAZDU (Silnik 2 - Obrót) ---
+		    if (angle_to_display == target_angle) {
+		        // JESTEŚMY U CELU OBROTOWEGO
+		        if (pwm_value_2 > 0) {
+		            soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
 		        } else {
-		            target_angle = preset_to_display;
+		            dont_ride();
+		            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
+		            ride_left_flag = 0;
+		            ride_right_flag = 0;
+		            soft_start = 0;
+		            comparision_mode = 1;
+		            is_slewing = 0;
 		        }
-
-		        // --- 5. LOGIKA DOJAZDU I ROZJAZDU (OBRÓT KOPUŁY) ---
-		        if (angle_to_display == target_angle) {
-		            // JESTEŚMY U CELU (Home lub Preset)
-
-		            if (pwm_value_2 > 0) {
-		                // Miękkie hamowanie silnika obrotu
-		                soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
+		    } else {
+		        // NIE JESTEŚMY U CELU -> KRĘCIMY KOPUŁĄ
+		        if (start_automation) {
+		            if (pwm_value_1 > 0) {
+		               // Klapa się rusza - całkowita blokada obrotu! Czekamy.
 		            } else {
-		                // Silnik ostatecznie zatrzymany
-		                dont_ride();
-		                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
+		                is_slewing = 1; // Flaga dla ASCOM (jedziemy)
 
-		                ride_left_flag = 0;
-		                ride_right_flag = 0;
-		                soft_start = 0;
-		                comparision_mode = 1; // Gotowość na kolejny ruch
+		                if (comparision_mode) {
+		                    float delta = target_angle - angle_to_display;
 
-		                if (!nextion_off) {
-		                    nextion_rain_off = 1;
-		                    nextion_off = 1;
-		                }
+		                    if (delta > 1800.0) delta -= 3600.0;
+		                    else if (delta < -1800.0) delta += 3600.0;
 
-		                // Przejścia maszyny stanów po dojeździe:
-		                if (rain_state == RAIN_STATE_GO_HOME) {
-		                    rain_state = RAIN_STATE_STOP_HOME;
-		                } else if (rain_state == RAIN_STATE_RESUME_DRIVE) {
-		                    // Spokojny dojazd do presetu po zamknięciu szczeliny zakończony!
-		                    rain_state = RAIN_STATE_FINISHED;
-		                }
-		            }
-		        } else {
-		            // NIE JESTEŚMY U CELU -> JEDZIEMY
-		            nextion_off = 0;
+		                    uint8_t target_left = (delta < 0.0) ? 1 : 0;
+		                    uint8_t target_right = (delta > 0.0) ? 1 : 0;
 
-		            if (start_automation) {
-		                // Blokada obrotu, jeśli trwa procedura zamykania szczeliny
-		                if (rain_state == RAIN_STATE_STOP_HOME ||
-		                    rain_state == RAIN_STATE_CLOSE_SHUTTER ||
-		                    rain_state == RAIN_STATE_STOP_SHUTTER) {
-		                    // Obrót zablokowany, czekamy na klapę
-		                } else {
-		                    if (comparision_mode) {
-		                        float delta = target_angle - angle_to_display;
-		                        if (delta > 1800.0) delta -= 3600.0;
-		                        else if (delta < -1800.0) delta += 3600.0;
-
-		                        uint8_t target_left = (delta < 0.0) ? 1 : 0;
-		                        uint8_t target_right = (delta > 0.0) ? 1 : 0;
-
-		                        // WERYFIKACJA: Czy deszcz wymusił na nas nagłą zmianę kierunku w locie?
-		                        if ((target_left && ride_right_flag) || (target_right && ride_left_flag)) {
-		                            if (pwm_value_2 > 0) {
-		                                // Najpierw BEZPIECZNIE wyhamuj stary kierunek!
-		                                soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
-		                            } else {
-		                                // Silnik stanął -> przypisz nowy kierunek
-		                                dont_ride();
-		                                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
-		                                ride_left_flag = target_left;
-		                                ride_right_flag = target_right;
-		                                soft_start = 0;
-		                                comparision_mode = 0; // Trasa ustalona, można jechać
-		                            }
+		                    if ((target_left && ride_right_flag) || (target_right && ride_left_flag)) {
+		                        if (pwm_value_2 > 0) {
+		                            soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
 		                        } else {
-		                            // Kontynuujemy jazdę w tym samym kierunku lub startujemy od zera
+		                            dont_ride();
+		                            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
 		                            ride_left_flag = target_left;
 		                            ride_right_flag = target_right;
+		                            soft_start = 0;
 		                            comparision_mode = 0;
 		                        }
+		                    } else {
+		                        ride_left_flag = target_left;
+		                        ride_right_flag = target_right;
+		                        comparision_mode = 0;
 		                    }
+		                }
 
-		                    // Fizyczne uruchomienie silnika obrotu (jeśli trasa i kierunek ustalony)
-		                    if (!comparision_mode) {
-		                        if (ride_left_flag) {
-		                            if (!soft_start) { ride_left(); soft_start = 1; }
-		                        } else if (ride_right_flag) {
-		                            if (!soft_start) { ride_right(); soft_start = 1; }
-		                        }
+		                if (!comparision_mode) {
+		                    if (ride_left_flag && !soft_start) { ride_left(); soft_start = 1; }
+		                    else if (ride_right_flag && !soft_start) { ride_right(); soft_start = 1; }
 
-		                        if (soft_start) {
-		                            soft_start_func(&pwm_value_2, 1, &tick_start_1);
-		                            if (pwm_value_2 == 65) soft_start = 0;
-		                        }
+		                    if (soft_start) {
+		                        soft_start_func(&pwm_value_2, 1, &tick_start_1);
+		                        if (pwm_value_2 == 65) soft_start = 0;
 		                    }
 		                }
 		            }
 		        }
+		    }
 
-		        // --- 6. SEKWENCJA ZAMYKANIA SZCZELINY ---
-		        if (rain_state == RAIN_STATE_STOP_HOME) {
-		            // Czekamy na 100% zatrzymania obrotu przed ruchem klapy
-		            if (pwm_value_2 == 0) {
-		                rain_state = RAIN_STATE_CLOSE_SHUTTER;
+		    // --- 5. SEKWENCJA PRACY SZCZELINY (Silnik 1) ---
+		    uint8_t is_at_home = (angle_to_display == angle_Home);
+
+		    if (is_at_home && pwm_value_2 == 0) {
+		        // PROCEDURA ZAMYKANIA KLAPY
+		        if (current_shutter_state == 3) {
+		            if (!ride_close_flag) {
+		                ride_close();
 		                ride_close_flag = 1;
-		                soft_start = 0; // Reset soft-startu pod silnik szczeliny
+		                ride_open_flag = 0;
+		                soft_start = 1;
 		            }
-		        }
 
-		        if (rain_state == RAIN_STATE_CLOSE_SHUTTER) {
-		            if (ride_close_flag) {
-		                if (!soft_start) { ride_close(); soft_start = 1; }
-		            }
 		            if (soft_start) {
 		                soft_start_func(&pwm_value_1, 0, &tick_start_1);
 		                if (pwm_value_1 == 65) soft_start = 0;
 		            }
 
-		            // Czujnik ToF raportuje zamknięcie
-		            if (tof_distance_mm <= 50) {
+		            if (tof_distance_mm <= 50.0) {
+		                if (pwm_value_1 > 0) {
+		                    soft_stop_func_alternate(&pwm_value_1, 0, &tick_stop_1);
+		                } else {
+		                    dont_ride();
+		                    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
+		                    ride_close_flag = 0;
+		                    current_shutter_state = 1; // Zamknięto
+		                }
+		            }
+		        }
+
+		        // PROCEDURA OTWIERANIA KLAPY
+		        else if (current_shutter_state == 2) {
+		            if (!ride_open_flag) {
+		                ride_open();
+		                ride_open_flag = 1;
 		                ride_close_flag = 0;
-		                rain_state = RAIN_STATE_STOP_SHUTTER;
+		                soft_start = 1;
+		            }
+
+		            if (soft_start) {
+		                soft_start_func(&pwm_value_1, 0, &tick_start_1);
+		                if (pwm_value_1 == 65) soft_start = 0;
+		            }
+
+		            if (tof_distance_mm >= 200.0) {
+		                if (pwm_value_1 > 0) {
+		                    soft_stop_func_alternate(&pwm_value_1, 0, &tick_stop_1);
+		                } else {
+		                    dont_ride();
+		                    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
+		                    ride_open_flag = 0;
+		                    current_shutter_state = 0; // Otwarto
+		                }
 		            }
 		        }
+		    }
 
-		        if (rain_state == RAIN_STATE_STOP_SHUTTER) {
-		            if (pwm_value_1 > 0) {
-		                // Miękkie wyhamowanie klapy po zamknięciu
-		                soft_stop_func_alternate(&pwm_value_1, 0, &tick_stop_1);
-		            } else {
-		                dont_ride();
-		                __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
-
-		                // Klapa zamknięta, włączamy powrót do dojazdu na spokojnie
-		                rain_state = RAIN_STATE_RESUME_DRIVE;
-		                comparision_mode = 1; // Przelicz trasę na nowo z obecnego punktu do presetu
-		            }
-		        }
-
-		        // --- 7. ZAKOŃCZENIE PROCEDURY ---
-		        if (rain_state == RAIN_STATE_FINISHED) {
-		            raindrop_signal = 0; // Reset flagi sprzętowej
-                    nextion_rain_off = 1;
-		            rain_state = RAIN_STATE_NONE;
-		        }
-	} else if(!page_manual && !page_auto){
+	} else if (!page_manual && !page_auto) {
 		// --- 1. RESET PODSTAWOWY ---
-		        timer_reset = 0;
-		        rain_string = 0;
-		        label_is_home = 0;
-		        // --- 2. RESET MASZYNY STANÓW AUTO ---
-		        start_automation = 0;
-		        automation_active = 0;
-		        comparision_mode = 1;
-		        nextion_off = 0;
-		        rain_state = RAIN_STATE_NONE;
-		        auto_delay_tick = HAL_GetTick(); // Reset tickera startowego
+		    timer_reset = 0;
+		    rain_string = 0;
+		    label_is_home = 0;
 
-		        // Zabezpieczenie zerowania flag kierunkowych
-		        ride_close_flag = 0;
-		        ride_left_flag = 0;
-		        ride_right_flag = 0;
+		    // --- 2. RESET MASZYNY STANÓW AUTO ---
+		    start_automation = 0;
+		    automation_active = 0;
+		    comparision_mode = 1;
+		    nextion_off = 0;
+		    rain_alert = 0;
+		    rain_state = RAIN_STATE_NONE;
+		    auto_delay_tick = HAL_GetTick();
 
-		        // --- 3. ZATRZYMANIE SILNIKÓW ---
-		        if(pwm_value_1 > 0 || pwm_value_2 > 0) {
-		            // Jeśli silniki się kręciły podczas wyjścia z Auto/Manual, bezpiecznie je wyhamuj
-		            soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
-		        } else {
-		            // Silniki stoją
-		            dont_ride();
-		            soft_stop = 0;
-		            soft_start = 0;
-		            pwm_run_1 = 0;
-		            pwm_run_2 = 0;
+		    ride_open_flag = 0;
+		    ride_close_flag = 0;
+		    ride_left_flag = 0;
+		    ride_right_flag = 0;
 
-		            CurrentDir = DIR_NONE;
-		            open = 0;
-		            close = 0;
-		            left = 0;
-		            right = 0;
+		    // --- 3. MIĘKKIE ZATRZYMANIE (Przy wychodzeniu z trybów) ---
+		    if(pwm_value_1 > 0 || pwm_value_2 > 0) {
+		        soft_stop_func(&pwm_value_1, &pwm_value_2, &tick_stop_1);
+		    } else {
+		        dont_ride();
+		        soft_stop = 0;
+		        soft_start = 0;
+		        pwm_run_1 = 0;
+		        pwm_run_2 = 0;
 
-		            // Reset i ponowna inicjalizacja sprzętowa PWM
-		            if(!reset_pwm) {
-		                HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
-		                HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
-		                MX_TIM2_Init();
-		                HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-		                HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
-		                reset_pwm = 1;
-		            }
+		        CurrentDir = DIR_NONE;
+		        open = 0; close = 0; left = 0; right = 0;
+
+		        if(!reset_pwm) {
+		            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+		            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
+		            MX_TIM2_Init();
+		            HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+		            HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
+		            reset_pwm = 1;
 		        }
+		    }
 	}
 	//pwm_signal_1 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value_1);
 	//pwm_signal_2 = __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, pwm_value_2);
@@ -971,7 +1088,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		HAL_UART_Receive_IT(&huart1, Rx_Data, 4);
 	}
 
-	if(huart->Instance == USART2) {
+	/*if(huart->Instance == USART2) {
 			if(ASCOM_Byte == '\n') {
 				// Znak końca - parsujemy!
 				ASCOM_Data[ASCOM_Index] = '\0'; // ZAWSZE zamykaj string znakiem NULL przed użyciem atof!
@@ -987,7 +1104,26 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			}
 
 			HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
+	} */
+
+	if(huart->Instance == USART2) {
+
+		for(int i = 0; i < 6; i++)
+		{
+			ASCOM_rx_buffer[i] = ASCOM_rx_buffer[i+1];
 		}
+
+		ASCOM_rx_buffer[6] = ASCOM_Byte;
+
+		if(ASCOM_rx_buffer[0] == 0x3A && ASCOM_rx_buffer[6] == 0x24)
+		{
+			ASCOM_ParseCommand(); // Wywołaj przetworzenie - ramka jest prawidłowa!
+		}
+
+		//ASCOM_frame_ready = 1;
+
+		HAL_UART_Receive_IT(&huart2, &ASCOM_Byte, 1);
+	}
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
