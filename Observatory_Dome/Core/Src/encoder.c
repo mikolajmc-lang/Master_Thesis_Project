@@ -117,6 +117,18 @@ void dont_ride()
 	HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
 }
 
+void dont_ride_shutter() {
+    // Gasi tylko piny klapy (Silnik 1)
+    HAL_GPIO_WritePin(GPIOB, ENGINE2P_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, ENGINE2L_Pin, GPIO_PIN_RESET);
+}
+
+void dont_ride_rot() {
+    // Gasi tylko piny obrotu (Silnik 2)
+    HAL_GPIO_WritePin(GPIOC, ENGINE1L_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, ENGINE1P_Pin, GPIO_PIN_RESET);
+}
+
 void soft_start_func(volatile uint8_t *pwm, uint8_t channel, uint32_t *tick)
 {
 	if(HAL_GetTick() - *tick > 20){

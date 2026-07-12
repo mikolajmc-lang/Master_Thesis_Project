@@ -99,7 +99,10 @@ volatile uint8_t is_home = 0;
 uint8_t pwm_run_1 = 0;
 uint8_t pwm_run_2 = 0;
 uint8_t soft_start_automatic = 0;
-uint8_t soft_start = 0;
+//uint8_t soft_start = 0;
+// Zamiast: uint8_t soft_start = 0;
+uint8_t soft_start_rot = 0;     // Miękki start dla Silnika 2 (Obrót)
+uint8_t soft_start_shutter = 0; // Miękki start dla Silnika 1 (Szczelina)
 uint8_t soft_stop = 0;
 
 uint8_t amp_waveform = 0;
@@ -189,6 +192,8 @@ void ride_right(void);
 void ride_open(void);
 void ride_close(void);
 void dont_ride(void);
+void dont_ride_shutter(void);
+void dont_ride_rot(void);
 void i2c_check(void);
 /* USER CODE END PFP */
 
@@ -532,7 +537,9 @@ int main(void)
 
 	    // 3. Resetowanie logiki napędu
 	    CurrentDir = DIR_NONE;
-	    soft_start = 0;
+	    // Zamiast: uint8_t soft_start = 0;
+	    soft_start_rot = 0;
+	    soft_start_shutter = 0;
 	    soft_stop = 0;
 	    pwm_run_1 = 0;
 	    pwm_run_2 = 0;
@@ -579,7 +586,8 @@ int main(void)
 			if(CurrentDir== DIR_OPEN) {
 			        // DRUGIE KLIKNIECIE: Silnik jedzie w tym samym kierunku, więc go zatrzymujemy
 			        soft_stop = 1;
-			        soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 			        CurrentDir = DIR_NONE; // Ważne: zmieniamy stan na NONE, żeby system wiedział, że dążymy do stopu
 			        open = 0;               // "Konsumujemy" flagę
 			} else {
@@ -589,11 +597,13 @@ int main(void)
 					CurrentDir = DIR_OPEN;
 					pwm_run_1 = 1;
 					pwm_run_2 = 0;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					open = 0;
 				} else {
 					soft_stop = 1;
-					soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 				}
 			}
 
@@ -602,7 +612,8 @@ int main(void)
 		if(close){
 			if(CurrentDir == DIR_CLOSE) {
 			        soft_stop = 1;
-			        soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 			        CurrentDir = DIR_NONE;
 			        close = 0;               // "Konsumujemy" flagę
 			} else {
@@ -611,11 +622,13 @@ int main(void)
 					CurrentDir = DIR_CLOSE;
 					pwm_run_1 = 1;
 					pwm_run_2 = 0;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					close = 0;
 				} else {
 					soft_stop = 1;
-					soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 				}
 			}
 		}
@@ -623,7 +636,8 @@ int main(void)
 		if(left){
 			if(CurrentDir == DIR_LEFT) {
 			        soft_stop = 1;
-			        soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 			        CurrentDir = DIR_NONE;
 			        left = 0;               // "Konsumujemy" flagę
 			} else {
@@ -632,11 +646,13 @@ int main(void)
 					CurrentDir = DIR_LEFT;
 					pwm_run_1 = 0;
 					pwm_run_2 = 1;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					left = 0;
 				} else {
 					soft_stop = 1;
-					soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 				}
 			}
 		}
@@ -644,7 +660,8 @@ int main(void)
 		if(right){
 			if(CurrentDir == DIR_RIGHT) {
 			        soft_stop = 1;
-			        soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 			        CurrentDir = DIR_NONE;
 			        right = 0;               // "Konsumujemy" flagę
 			} else {
@@ -653,16 +670,18 @@ int main(void)
 					CurrentDir = DIR_RIGHT;
 					pwm_run_1 = 0;
 					pwm_run_2 = 1;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					right = 0;
 				} else {
 					soft_stop = 1;
-					soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 				}
 			}
 		}
 
-		if(soft_start){
+		if(soft_start_rot || soft_start_shutter){
 
 			if(pwm_run_1)
 				soft_start_func(&pwm_value_1, 0, &tick_start_1);
@@ -670,9 +689,10 @@ int main(void)
 			if(pwm_run_2)
 				soft_start_func(&pwm_value_2, 1, &tick_start_1);
 
-			if(pwm_value_1 >= 65 || pwm_value_2 >= 65) // Silnik musi się rozpedzić
-				soft_start = 0;
-
+			if(pwm_value_1 >= 65 || pwm_value_2 >= 65) { // Silnik musi się rozpedzić
+				soft_start_rot = 0;
+				soft_start_shutter = 0;
+			}
 		}
 
 		if(soft_stop){
@@ -706,34 +726,39 @@ int main(void)
 					CurrentDir = DIR_OPEN;
 					pwm_run_1 = 1;
 					pwm_run_2 = 0;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					open = 0;
 				}else if(close){
 					ride_close();
 					CurrentDir = DIR_CLOSE;
 					pwm_run_1 = 1;
 					pwm_run_2 = 0;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					close = 0;
 				}else if(left){
 					ride_left();
 					CurrentDir = DIR_LEFT;
 					pwm_run_2 = 1;
 					pwm_run_1 = 0;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					left = 0;
 				}else if(right){
 					ride_right();
 					CurrentDir = DIR_RIGHT;
 					pwm_run_2 = 1;
 					pwm_run_1 = 0;
-					soft_start = 1;
+					soft_start_rot = 1;
+					soft_start_shutter = 1;
 					right = 0;
 				}else {
 					CurrentDir = DIR_NONE;
 					pwm_run_1 = 0;
 					pwm_run_2 = 0;
-					soft_start = 0;
+					soft_start_rot = 0;
+					soft_start_shutter = 0;
 				}
 
 			}
@@ -806,11 +831,11 @@ int main(void)
 		        if (pwm_value_2 > 0) {
 		            soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
 		        } else {
-		            dont_ride();
+		        	dont_ride_rot(); // <--- ZMIANA! Teraz gasi tylko silnik rotacji
 		            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
 		            ride_left_flag = 0;
 		            ride_right_flag = 0;
-		            soft_start = 0;
+		    	    soft_start_rot = 0;
 		            comparision_mode = 1;
 		            is_slewing = 0;
 		        }
@@ -835,11 +860,11 @@ int main(void)
 		                        if (pwm_value_2 > 0) {
 		                            soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
 		                        } else {
-		                            dont_ride();
+		        		        	dont_ride_rot(); // <--- ZMIANA! Teraz gasi tylko silnik rotacji
 		                            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 42);
 		                            ride_left_flag = target_left;
 		                            ride_right_flag = target_right;
-		                            soft_start = 0;
+		                    	    soft_start_rot = 0;
 		                            comparision_mode = 0;
 		                        }
 		                    } else {
@@ -850,12 +875,12 @@ int main(void)
 		                }
 
 		                if (!comparision_mode) {
-		                    if (ride_left_flag && !soft_start) { ride_left(); soft_start = 1; }
-		                    else if (ride_right_flag && !soft_start) { ride_right(); soft_start = 1; }
+		                    if (ride_left_flag && !soft_start_rot) { ride_left(); soft_start_rot = 1; }
+		                    else if (ride_right_flag && !soft_start_rot) { ride_right(); soft_start_rot = 1; }
 
-		                    if (soft_start) {
+		                    if (soft_start_rot) {
 		                        soft_start_func(&pwm_value_2, 1, &tick_start_1);
-		                        if (pwm_value_2 == 65) soft_start = 0;
+		                        if (pwm_value_2 == 65) soft_start_rot = 0;
 		                    }
 		                }
 		            }
@@ -872,22 +897,23 @@ int main(void)
 		                ride_close();
 		                ride_close_flag = 1;
 		                ride_open_flag = 0;
-		                soft_start = 1;
+		                soft_start_shutter = 1;
 		            }
 
-		            if (soft_start) {
+		            if (soft_start_shutter) {
 		                soft_start_func(&pwm_value_1, 0, &tick_start_1);
-		                if (pwm_value_1 == 65) soft_start = 0;
+		                if (pwm_value_1 == 65) soft_start_shutter = 0;
 		            }
 
 		            if (tof_distance_mm <= 50.0) {
 		                if (pwm_value_1 > 0) {
 		                    soft_stop_func_alternate(&pwm_value_1, 0, &tick_stop_1);
 		                } else {
-		                    dont_ride();
+		                	dont_ride_shutter(); // <--- ZMIANA!
 		                    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
 		                    ride_close_flag = 0;
 		                    current_shutter_state = 1; // Zamknięto
+		                    raindrop_signal = 0;
 		                }
 		            }
 		        }
@@ -898,19 +924,19 @@ int main(void)
 		                ride_open();
 		                ride_open_flag = 1;
 		                ride_close_flag = 0;
-		                soft_start = 1;
+		                soft_start_shutter = 1;
 		            }
 
-		            if (soft_start) {
+		            if (soft_start_shutter) {
 		                soft_start_func(&pwm_value_1, 0, &tick_start_1);
-		                if (pwm_value_1 == 65) soft_start = 0;
+		                if (pwm_value_1 == 65) soft_start_shutter = 0;
 		            }
 
 		            if (tof_distance_mm >= 200.0) {
 		                if (pwm_value_1 > 0) {
 		                    soft_stop_func_alternate(&pwm_value_1, 0, &tick_stop_1);
 		                } else {
-		                    dont_ride();
+		                	dont_ride_shutter(); // <--- ZMIANA!
 		                    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 42);
 		                    ride_open_flag = 0;
 		                    current_shutter_state = 0; // Otwarto
@@ -931,6 +957,7 @@ int main(void)
 		    comparision_mode = 1;
 		    nextion_off = 0;
 		    rain_alert = 0;
+		    raindrop_signal = 0;
 		    rain_state = RAIN_STATE_NONE;
 		    auto_delay_tick = HAL_GetTick();
 
@@ -945,7 +972,8 @@ int main(void)
 		    } else {
 		        dont_ride();
 		        soft_stop = 0;
-		        soft_start = 0;
+		        soft_start_rot = 0;
+		        soft_start_shutter = 0;
 		        pwm_run_1 = 0;
 		        pwm_run_2 = 0;
 
