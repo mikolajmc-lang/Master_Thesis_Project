@@ -95,6 +95,7 @@ volatile uint8_t abort_slew_flag = 0;
 volatile uint8_t nextion_rain_on = 0;
 volatile uint8_t nextion_rain_off = 0;
 volatile uint8_t is_home = 0;
+volatile uint8_t is_calibrated = 0; // 0 - wymaga bazowania, 1 - gotowy do pracy
 
 uint8_t pwm_run_1 = 0;
 uint8_t pwm_run_2 = 0;
@@ -110,8 +111,8 @@ uint8_t amp_waveform_1 = 0;
 
 // Sekcja komunikacji dwustronnej ASCOM - PC
 
-uint8_t ASCOM_rx_buffer[7]; // Bufor na rozkaz z PC (7 bajtów)
-uint8_t ASCOM_tx_buffer[11]; // Bufor na odpowiedź ze statusem (11 bajtów)
+uint8_t ASCOM_rx_buffer[8]; // Bufor na rozkaz z PC + suma kontrolna (8 bajtów)
+uint8_t ASCOM_tx_buffer[13]; // Bufor na odpowiedź ze statusem + suma kontrolna (12 bajtów)
 
 uint8_t current_shutter_state = 1; // // 0=Open, 1=Closed, 2=Opening, 3=Closing, 4=Error
 uint8_t is_slewing = 0;           // Flaga ruchu obrotowego kopuły
@@ -303,8 +304,29 @@ uint16_t tof_data_request_nonblocking_mode(void)
 	return distance;
 }
 
+uint8_t Sum_Control(uint8_t *data, uint8_t len)
+{
+	uint8_t xor_val = 0;
+
+	for(uint8_t i = 0; i < len; i++)
+	{
+		xor_val ^= data[i]; // XOR
+	}
+
+	return xor_val;
+}
+
 void ASCOM_SendStatus(void)
 {
+	uint32_t tx_timeout = HAL_GetTick();
+
+	while(huart2.gState == HAL_UART_STATE_BUSY_TX)
+	{
+		if(HAL_GetTick() - tx_timeout > 3) {
+			return; // Jeśli port jest zajęty za długo, porzucamy wysyłkę
+		}
+	}
+
 	ByteConverter az_conv;
 	uint8_t motor_flags = 0;
 
@@ -316,8 +338,10 @@ void ASCOM_SendStatus(void)
 		motor_flags |= 0x01; // Bit 0 (kopula obraca sie)
 	if(rain_alert)
 		motor_flags |= 0x02; // Bit 1 (Deszcz trwa)
-	if(angle_to_display == 0.0f)
-		motor_flags |= 0x04; // Kopuła jest w pozycji Home
+	if(angle_to_display == 0.0f && is_calibrated)
+		motor_flags |= 0x04; // Bit 2 Kopuła jest w pozycji Home
+	if(is_calibrated)
+		motor_flags |= 0x08; // Bit 3 Kopuła została zbazowana sprzętowo do Home
 
 	// Konstrukcja stałej długości ramki danych
 	ASCOM_tx_buffer[0] = 0x23; // Znak początku #
@@ -339,34 +363,44 @@ void ASCOM_SendStatus(void)
 
 	ASCOM_tx_buffer[10] = motor_flags; // Bajt flag kontrolnych otwierania/zamykania klapy
 
-	uint32_t tx_timeout = HAL_GetTick();
+	ASCOM_tx_buffer[11] = Sum_Control(&ASCOM_tx_buffer[1], 10); // Suma kontrolna
 
-	while(huart2.gState == HAL_UART_STATE_BUSY_TX)
-	{
-		if(HAL_GetTick() - tx_timeout > 3) {
-			return;
-		}
-	}
+	ASCOM_tx_buffer[12] = 0x24;
 
-	HAL_UART_Transmit_DMA(&huart2, ASCOM_tx_buffer, 11);
+	HAL_UART_Transmit_DMA(&huart2, ASCOM_tx_buffer, 13);
 }
 
 void ASCOM_ParseCommand(void)
 {
 	// Weryfikacja ramki, sprawdzenie czy przyszlo : oraz $
-	if(ASCOM_rx_buffer[0] == 0x3A && ASCOM_rx_buffer[6] == 0x24)
+	if(ASCOM_rx_buffer[0] == 0x3A && ASCOM_rx_buffer[7] == 0x24)
 	{
-		uint8_t cmd_code = ASCOM_rx_buffer[1];
+		uint8_t cmd_code = 0;
+		uint8_t received_crc = ASCOM_rx_buffer[6];
 		ByteConverter target_az;
 
-		// Bezpośrednie zmapowanie 4 bajtów danych z bufora na wartość float (Azimuth)
-		target_az.bytes[0] = ASCOM_rx_buffer[2];
-		target_az.bytes[1] = ASCOM_rx_buffer[3];
-		target_az.bytes[2] = ASCOM_rx_buffer[4];
-		target_az.bytes[3] = ASCOM_rx_buffer[5];
+		uint8_t check_crc = Sum_Control(&ASCOM_rx_buffer[1], 5);
+
+
+		if(check_crc == received_crc) {
+			// Bezpośrednie zmapowanie 4 bajtów danych z bufora na wartość float (Azimuth) + przypisanie rozkazu cmd_code
+			cmd_code = ASCOM_rx_buffer[1];
+			target_az.bytes[0] = ASCOM_rx_buffer[2];
+			target_az.bytes[1] = ASCOM_rx_buffer[3];
+			target_az.bytes[2] = ASCOM_rx_buffer[4];
+			target_az.bytes[3] = ASCOM_rx_buffer[5];
+		} else {
+			return;
+		}
 
 		// System bezpieczenstwa
 		if (rain_alert && (cmd_code == 1 || cmd_code == 2 || cmd_code == 4)) {
+			ASCOM_SendStatus();
+			return;
+		}
+
+		// W przypadku braku kalibracji
+		if(!is_calibrated && (cmd_code == 2 || cmd_code == 3 || cmd_code == 4)) {
 			ASCOM_SendStatus();
 			return;
 		}
@@ -492,11 +526,14 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	/* if(ASCOM_frame_ready) {
+	if(ASCOM_frame_ready) {
 		ASCOM_frame_ready = 0;
 
-		ASCOM_ParseCommand();
-	} */
+		ASCOM_ParseCommand(); // Wywołaj przetworzenie - ramka jest prawidłowa!
+
+		ASCOM_rx_buffer[0] = 0x00;
+		ASCOM_rx_buffer[7] = 0x00;
+	}
 
 
 	if(HAL_GetTick() - ToF_delay_time >= 30)
@@ -519,9 +556,37 @@ int main(void)
 	static uint32_t auto_delay_tick = 0;
 	static uint8_t rain_state = RAIN_STATE_NONE;
 
-	counter = encoder_cnt_get();
-	angle_to_display = encoder_angle_get(counter);
+	// ==========================================================================
+	// SPRZĘTOWA KALIBRACJA (HOMING / SENSOR RESET)
+	// ==========================================================================
+	if (is_home) {
+	    // 1. Sprzętowe wyzerowanie rejestru CNT dla Timera 3 (odpowiedzialnego za enkoder)
+	    __HAL_TIM_SET_COUNTER(&htim3, 0);
 
+	    // 2. Natychmiastowe wyzerowanie lokalnych zmiennych procesowych
+	    counter = 0;
+	    angle_to_display = 0.0; // Wymuszenie idealnego zera fizycznego
+
+	    // 3. Kalibracja
+	    is_calibrated = 1;
+
+	    if(is_slewing) {
+	    	is_slewing = 0;
+	    	comparision_mode = 1;
+	    }
+
+	    // 4. Skasowanie flagi, informując system, że kalibracja została zakończona
+	    is_home = 0;
+	} else {
+	    // Standardowy, ciągły odczyt enkodera, gdy czujnik Home nie jest zwarty
+	    counter = encoder_cnt_get();
+	    angle_to_display = encoder_angle_get(counter);
+	}
+
+
+	// ==========================================================================
+	// STOP ASCOM button
+	// ==========================================================================
 	if (abort_slew_flag) {
 	    // 1. Twarde odcięcie sprzętowe
 	    dont_ride();
@@ -535,7 +600,14 @@ int main(void)
 	    ride_left_flag = 0; ride_right_flag = 0;
 	    ride_open_flag = 0; ride_close_flag = 0;
 
-	    // 3. Resetowanie logiki napędu
+	    // 3. Synchronizacja celu - KLUCZOWE!
+	    // Oszukujemy maszynę stanów, że jesteśmy u celu, żeby nie wznowiła jazdy
+	    target_angle = angle_to_display;
+	    preset_to_display = angle_to_display;
+	    comparision_mode = 1;
+	    is_slewing = 0;
+
+	    // 4. Resetowanie logiki napędu
 	    CurrentDir = DIR_NONE;
 	    // Zamiast: uint8_t soft_start = 0;
 	    soft_start_rot = 0;
@@ -544,13 +616,19 @@ int main(void)
 	    pwm_run_1 = 0;
 	    pwm_run_2 = 0;
 
-	    // 4. Synchronizacja celu - KLUCZOWE!
-	    // Oszukujemy maszynę stanów, że jesteśmy u celu, żeby nie wznowiła jazdy
-	    target_angle = angle_to_display;
-	    preset_to_display = angle_to_display;
-	    comparision_mode = 1;
-	    is_slewing = 0;
 
+	    // 5. Zatrzymanie szczeliny z uwzględnieniem RZECZYWISTEJ pozycji ToF
+		if (current_shutter_state == 2 || current_shutter_state == 3) {
+			if (tof_distance_mm <= 50.0) {
+				current_shutter_state = 1; // W pełni zamknięta
+			} else if (tof_distance_mm >= 200.0) {
+				current_shutter_state = 0; // W pełni otwarta
+			} else {
+				// Zatrzymana w połowie drogi (np. ToF = 100mm)
+				// Stan 4 w ASCOM to 'shutterError'
+				current_shutter_state = 4;
+			}
+		}
 	    // Zatrzymanie awaryjne skonsumowane
 	    abort_slew_flag = 0;
 	}
@@ -826,7 +904,11 @@ int main(void)
 		    }
 
 		    // --- 4. LOGIKA DOJAZDU (Silnik 2 - Obrót) ---
-		    if (angle_to_display == target_angle) {
+
+		    uint8_t force_homing = (!is_calibrated && is_slewing);
+
+
+		    if (angle_to_display == target_angle && !force_homing) {
 		        // JESTEŚMY U CELU OBROTOWEGO
 		        if (pwm_value_2 > 0) {
 		            soft_stop_func_alternate(&pwm_value_2, 1, &tick_stop_1);
@@ -848,13 +930,25 @@ int main(void)
 		                is_slewing = 1; // Flaga dla ASCOM (jedziemy)
 
 		                if (comparision_mode) {
-		                    float delta = target_angle - angle_to_display;
 
-		                    if (delta > 1800.0) delta -= 3600.0;
-		                    else if (delta < -1800.0) delta += 3600.0;
+		                    uint8_t target_left = 0;
+		                    uint8_t target_right = 0;
 
-		                    uint8_t target_left = (delta < 0.0) ? 1 : 0;
-		                    uint8_t target_right = (delta > 0.0) ? 1 : 0;
+		                	if(force_homing) {
+		                		// TRYB SZUKANIA ZERA:
+								// Omijamy wyliczanie delty z enkoderów. Wymuszamy kręcenie w jednym
+								// kierunku aż fizyczny czujnik 'is_home' przerwie ten proces w innej części kodu.
+								target_right = 1; // Kopuła jedzie w prawo by znaleźć krańcówkę
+								target_left = 0;
+		                	} else {
+			                    float delta = target_angle - angle_to_display;
+
+			                    if (delta > 1800.0) delta -= 3600.0;
+			                    else if (delta < -1800.0) delta += 3600.0;
+
+			                    target_left = (delta < 0.0) ? 1 : 0;
+								target_right = (delta > 0.0) ? 1 : 0;
+		                	}
 
 		                    if ((target_left && ride_right_flag) || (target_right && ride_left_flag)) {
 		                        if (pwm_value_2 > 0) {
@@ -888,7 +982,7 @@ int main(void)
 		    }
 
 		    // --- 5. SEKWENCJA PRACY SZCZELINY (Silnik 1) ---
-		    uint8_t is_at_home = (angle_to_display == angle_Home);
+		    uint8_t is_at_home = (angle_to_display == angle_Home && is_calibrated);
 
 		    if (is_at_home && pwm_value_2 == 0) {
 		        // PROCEDURA ZAMYKANIA KLAPY
@@ -1136,16 +1230,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 	if(huart->Instance == USART2) {
 
-		for(int i = 0; i < 6; i++)
+		for(int i = 0; i < 7; i++)
 		{
 			ASCOM_rx_buffer[i] = ASCOM_rx_buffer[i+1];
 		}
 
-		ASCOM_rx_buffer[6] = ASCOM_Byte;
+		ASCOM_rx_buffer[7] = ASCOM_Byte;
 
-		if(ASCOM_rx_buffer[0] == 0x3A && ASCOM_rx_buffer[6] == 0x24)
+		if(ASCOM_rx_buffer[0] == 0x3A && ASCOM_rx_buffer[7] == 0x24)
 		{
-			ASCOM_ParseCommand(); // Wywołaj przetworzenie - ramka jest prawidłowa!
+			ASCOM_frame_ready = 1; // flaga to przetworzenia danych
 		}
 
 		//ASCOM_frame_ready = 1;
