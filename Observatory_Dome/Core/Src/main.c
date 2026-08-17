@@ -526,7 +526,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	if(ASCOM_frame_ready) {
+/*	if(ASCOM_frame_ready) {
 		ASCOM_frame_ready = 0;
 
 		ASCOM_ParseCommand(); // Wywołaj przetworzenie - ramka jest prawidłowa!
@@ -1090,7 +1090,7 @@ int main(void)
 	// filtr cyfrowy 1 rzędu
 
 	// skalowanie pradu - wzór funkcji liniowej
-
+*/
 	filtered_value_0 = get_current_offset(current_engine_value[0], filtered_value_0);
 	filtered_value_1 = get_current_offset(current_engine_value[1], filtered_value_1);
 
@@ -1107,7 +1107,7 @@ int main(void)
 
 		static uint8_t waveform_queue = 0;
 
-		rain_string = 0;
+		//rain_string = 0;
 
 		if(huart1.gState == HAL_UART_STATE_READY) {
 			if(HAL_GetTick() - wave_delay_time_0 > 15) {

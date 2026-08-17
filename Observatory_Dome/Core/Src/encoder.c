@@ -16,6 +16,20 @@
 
 #define alpha 0.05
 
+
+// Parametry układu i czujnika
+#define V_REF           3.3f
+#define ADC_MAX         4095.0f
+#define R1_VAL          985.0f
+#define R2_VAL          2150.0f
+#define SENSITIVITY     0.100f  // 0.100f dla 20A, 0.066f dla 30A, 0.185f dla 5A
+#define V_ZERO          2.500f  // Napięcie przy 0A (warto zmierzyć lub skalibrować programowo)
+
+// Obliczone stałe
+#define DIVIDER_RATIO   (R2_VAL / (R1_VAL + R2_VAL))
+//#define SCALE_FACTOR    (V_REF / (ADC_MAX * DIVIDER_RATIO * SENSITIVITY))
+#define OFFSET_CURRENT  (V_ZERO / SENSITIVITY)
+
 extern uint8_t ToF_Data[2];
 
 
@@ -63,9 +77,12 @@ float get_current_offset(uint16_t dma_adc_index, float offset)
 float get_amps(float filter_value)
 {
 	// skalowanie pradu - wzór funkcji liniowej
-	float amp = (float)((20.0/1927.0)*filter_value - 22.5);
+	//float amp = (float)((20.0/1895.0)*filter_value - 22.16);
+	//return amp;
+	const float ADC_ZERO = 2225.0f;     // Wartość z DMA przy I = 0 A
+	const float SCALE_FACTOR = 0.01176f; // (V_REF / (4095 * k_div * Sensitivity))
 
-	return amp;
+	    return (filter_value - ADC_ZERO) * SCALE_FACTOR;
 }
 
 void encoder_display_angle(uint16_t position)
