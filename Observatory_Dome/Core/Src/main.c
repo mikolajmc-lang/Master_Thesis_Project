@@ -378,9 +378,7 @@ void ASCOM_ParseCommand(void)
 		uint8_t cmd_code = 0;
 		uint8_t received_crc = ASCOM_rx_buffer[6];
 		ByteConverter target_az;
-
 		uint8_t check_crc = Sum_Control(&ASCOM_rx_buffer[1], 5);
-
 
 		if(check_crc == received_crc) {
 			// Bezpośrednie zmapowanie 4 bajtów danych z bufora na wartość float (Azimuth) + przypisanie rozkazu cmd_code
@@ -450,7 +448,6 @@ void ASCOM_ParseCommand(void)
 			break;
 
 			default:
-
 			break;
 		}
 
@@ -526,7 +523,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-/*	if(ASCOM_frame_ready) {
+	if(ASCOM_frame_ready) {
 		ASCOM_frame_ready = 0;
 
 		ASCOM_ParseCommand(); // Wywołaj przetworzenie - ramka jest prawidłowa!
@@ -1090,7 +1087,7 @@ int main(void)
 	// filtr cyfrowy 1 rzędu
 
 	// skalowanie pradu - wzór funkcji liniowej
-*/
+
 	filtered_value_0 = get_current_offset(current_engine_value[0], filtered_value_0);
 	filtered_value_1 = get_current_offset(current_engine_value[1], filtered_value_1);
 
